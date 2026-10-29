@@ -1,0 +1,137 @@
+name: vibe
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vibe
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vibe}
+      POSTGRES_DB: vibe
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibe"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  valkey:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: chrislusf/seaweedfs:3.80
+    hostname: seaweedfs
+    command: ["server", "-dir=/data", "-ip=seaweedfs", "-s3", "-s3.port=9000", "-master.volumeSizeLimitMB=10240"]
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "9000:9000"
+      - "9333:9333"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_HOSTNAME:-http://localhost:8081}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      MESSENGER_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:-dev-web-secret-change-me}
+      MESSENGER_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-dev-backend-secret-change-me}
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro
+      - kcdata:/opt/keycloak/data
+    ports:
+      - "8081:8080"
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      ENV: dev
+      DATABASE_URL: postgresql+asyncpg://vibe:${POSTGRES_PASSWORD:-vibe}@postgres:5432/vibe
+      VALKEY_URL: valkey://valkey:6379/0
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:-dev-web-secret-change-me}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-dev-backend-secret-change-me}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.cli ensure-bucket &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    ports:
+      - "8001:8000"
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      ENV: dev
+      DATABASE_URL: postgresql+asyncpg://vibe:${POSTGRES_PASSWORD:-vibe}@postgres:5432/vibe
+      VALKEY_URL: valkey://valkey:6379/0
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:-dev-web-secret-change-me}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-dev-backend-secret-change-me}
+      S3_ENDPOINT_URL: http://minio:9000
+      KEYCLOAK_SYNC_ENABLED: "0"
+    depends_on:
+      api:
+        condition: service_started
+    command: ["python", "-m", "worker.main"]
+
+  nginx:
+    image: nginx:1.27
+    profiles: ["edge"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../web/dist:/usr/share/nginx/html/web:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  monitoring:
+    image: grafana/prometheus:latest
+    profiles: ["monitoring"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+volumes:
+  pgdata:
+  miniodata:
+  kcdata:
