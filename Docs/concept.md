@@ -82,6 +82,19 @@ deploy/
 4. При первом входе бэкенд делает upsert локального пользователя по `sub` (см. §6).
 5. Refresh-токен живёт только во фронтенде (silent refresh), бэкенд его не видит.
 
+**Выбор фронтенд-библиотеки (этап 10): `oidc-client-ts` + `react-oidc-context`** — тонкая React-обёртка над стандартным OIDC client'ом; keycloak-js привязывает фронт к KC-адаптеру. Хранение токенов: память + `sessionStorage` (переживает reload вкладки; XSS-риск задокументирован — стандартный компромисс SPA). Silent refresh — через refresh token (silent-check iframe как fallback).
+
+### Frontend-архитектура (этап 10)
+- **Стек:** React 19 + TS + Vite; Tailwind CSS 4 + shadcn/ui; TanStack Query v5 (REST-кэш, query keys: `['chats']`, `['messages', chatId, ...]`, `['users']`); Zustand — WS-статус и живые события; `oidc-client-ts` — auth; `react-router` — маршруты.
+- **WS-интеграция:** Zustand-стор принимает события WS и точечно обновляет TanStack Query cache (`setQueryData` для `message.new/edited/deleted`, `reaction.updated`, `read`; инвалидирует `['chats']` на изменениях состава). Typing — локальный стор (не Query). Дедупликация по message id; оптимистичная отправка — `client_ref` как temp-id, замена на серверный при подтверждении.
+- **Realtime-протокол клиента:** ticket `POST /ws/ticket` → `WS /ws?ticket=`; reconnect с backoff; после reconnect — REST-догоняние (§9): `GET /chats` + `?after=`/`?updated_after=` по открытым чатам.
+- **Реакции:** панель 5 эмодзи (`thumbs_up`/`heart`/`laugh`/`fire`/`check`) на hover/long-tap; toggle `PUT /messages/{id}/reactions`; optimistic toggle в кэше.
+- **Время:** отображение по `users.time_display` (browser|as_sent|fixed|utc); для `as_sent` конверсия в `messages.timezone`; редактирование по окну — фронт считывает конфиг из ответа API (нет в MVP — константа 24 ч).
+- **Страницы:** `/login` (redirect на KC), `/register` (инвайт-форма), `/` (список чатов), `/chat/:id`, `/settings` (профиль: персональные данные + time_display/timezone; платформенному админу — секции боты/инвайты).
+- **API-клиент:** тонкий fetch-обёртка над `/api/v1` (Bearer из OIDC; 401 → silent renew → retry; WS ticket — отдельная функция).
+
+**Выбор фронтенд-библиотеки (этап 10): `oidc-client-ts`** — framework-agnostic, активная поддержка, React-интеграция (`react-oidc-context`) тонкая и не тянет состояние в глобальный провайдер; keycloak-js привязывает приложение к KC-адаптеру и усложняет переход к стандартному OIDC. Токены — в памяти + `sessionStorage` (XSS-компромисс задокументирован; refresh rotation снижает риск). Silent refresh через iframe (default) + fallback на повторный логин.
+
 ### Разграничение: аутентификация vs персональные данные
 Keycloak — **только identification/authentication**: он выдаёт стабильный `sub` и проверяет учётные данные (логин-пароль, в перспективе LDAP/Kerberos через федерацию). Все персональные данные пользователя — имя, фамилия, почта, отображаемое имя, аватар, часовой пояс — **хранятся и редактируются на уровне системы** (PostgreSQL vibe-chat, профиль через `PATCH /users/me`):
 
