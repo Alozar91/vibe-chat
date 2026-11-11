@@ -1,5 +1,6 @@
 """Точка входа FastAPI."""
 
+import asyncio
 import contextlib
 from collections.abc import AsyncIterator
 
@@ -11,8 +12,12 @@ settings = get_settings()
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # бакет Silo — гарантируется при старте (§8): иначе первая загрузка — NoSuchBucket
+    from app.services.files import ensure_bucket
     from app.services.periodic import start_background_tasks, stop_background_tasks
 
+    with contextlib.suppress(Exception):  # недоступный Silo не роняет бэкенд
+        await asyncio.to_thread(ensure_bucket)
     tasks = start_background_tasks(app)
     yield
     stop_background_tasks(tasks)

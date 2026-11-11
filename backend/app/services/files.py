@@ -55,17 +55,21 @@ def thumb_storage_key(file_id: str) -> str:
 
 
 def presign_put(storage_key: str, size: int, mime: str, ttl_seconds: int) -> str:
+    """Presigned PUT на публичном host (входит в подпись, §13): браузер кладёт файл
+    напрямую в Silo по публичному адресу — как и читает по presigned GET."""
     client = _s3_client()
-    url: str = client.generate_presigned_url(
-        "put_object",
-        Params={
-            "Bucket": get_settings().silo_bucket,
-            "Key": storage_key,
-            "ContentLength": size,
-            "ContentType": mime,
-        },
-        ExpiresIn=ttl_seconds,
-    )
+    params: dict[str, Any] = {
+        "Bucket": get_settings().silo_bucket,
+        "Key": storage_key,
+        "ContentLength": size,
+        "ContentType": mime,
+    }
+    url: str = client.generate_presigned_url("put_object", Params=params, ExpiresIn=ttl_seconds)
+    url = str(url)
+    internal = get_settings().silo_internal_url
+    public = _public_host()
+    if internal != public:
+        url = url.replace(internal, public, 1)
     return url
 
 
@@ -84,6 +88,20 @@ def presign_get_url(storage_key: str, *, ttl_seconds: int, download_name: str | 
     if internal != public:
         url = url.replace(internal, public, 1)
     return url
+
+
+def ensure_bucket() -> None:
+    """Создаёт бакет, если его нет (§8, вызов при старте бэкенда).
+
+    Идемпотентно: 409 BucketAlreadyOwnedByYou — норма. Недоступный Silo не
+    роняет старт: вызывающая сторона (lifespan) глотает исключение.
+    """
+    client = _s3_client()
+    bucket = get_settings().silo_bucket
+    try:
+        client.head_bucket(Bucket=bucket)
+    except client.exceptions.ClientError:
+        client.create_bucket(Bucket=bucket)
 
 
 def head_object(storage_key: str) -> dict[str, Any]:

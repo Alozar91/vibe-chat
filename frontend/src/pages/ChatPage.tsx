@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Paperclip, Send, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { chatsApi, messagesApi, usersApi } from '@/api/client'
+import { chatsApi, messagesApi, uploadFile, usersApi } from '@/api/client'
 import type { Message } from '@/api/types'
 import { MessageBubble } from '@/components/MessageBubble'
 import { useWsStore } from '@/realtime/ws'
@@ -55,14 +55,35 @@ export function ReactionBar({
   )
 }
 
+/** Вложение, готовящееся к отправке: загруженное или в процессе. */
+interface PendingAttachment {
+  id: string
+  file: File
+  status: 'uploading' | 'ready' | 'error'
+  fileId?: string
+}
+
+const MAX_ATTACHMENTS = 10 // §16 лимиты
+
+/** Прикидка kind на клиенте: точную сверку с real_mime делает бэкенд (§7). */
+function attachmentKind(f: File): 'image' | 'video' | 'file' {
+  if (f.type === 'image/svg+xml') return 'file' // SVG — не image (§8)
+  if (f.type.startsWith('image/')) return 'image'
+  if (f.type.startsWith('video/')) return 'video'
+  return 'file'
+}
+
 export function ChatPage() {
   const { chatId } = useParams()
   const queryClient = useQueryClient()
   const [text, setText] = useState('')
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [editing, setEditing] = useState<Message | null>(null)
+  const [pending, setPending] = useState<PendingAttachment[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastReadRef = useRef<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const addingRef = useRef(0)
 
   const me = useQuery({ queryKey: ['me'], queryFn: usersApi.me })
 
@@ -82,12 +103,17 @@ export function ChatPage() {
   const online = useWsStore((s) => s.online)
 
   const send = useMutation({
-    mutationFn: (payload: { text: string }) => {
+    mutationFn: async (payload: { text: string }) => {
       const clientRef = crypto.randomUUID()
+      // kind сверяется бэкендом с real_mime (§7); здесь — прикидка по mime файла
+      const attachments = pending
+        .filter((p) => p.status === 'ready' && p.fileId)
+        .map((p) => ({ file_id: p.fileId!, kind: attachmentKind(p.file), file_name: p.file.name }))
       return messagesApi.send(
         chatId!,
         {
-          text: payload.text,
+          text: payload.text || undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
           reply_to_id: replyTo?.id,
           client_ref: clientRef,
           timezone: browserTimezone(),
@@ -106,9 +132,9 @@ export function ChatPage() {
         return [...cleaned, msg]
       })
       void queryClient.invalidateQueries({ queryKey: ['chats'] })
+      setPending([])
     },
   })
-
   const editMsg = useMutation({
     mutationFn: ({ id, text: t }: { id: string; text: string }) => messagesApi.edit(id, t),
     onSuccess: (msg) => {
@@ -165,14 +191,40 @@ export function ChatPage() {
     meId,
   )
 
+  /** Выбор файлов скрепкой: сразу добавляем в pending и грузим в Silo (§8). */
+  const handleFiles = (files: FileList | null) => {
+    if (!files?.length) return
+    for (const f of Array.from(files)) {
+      if (pending.length + addingRef.current >= MAX_ATTACHMENTS) break
+      addingRef.current += 1
+      const id = crypto.randomUUID()
+      setPending(list => list.concat({ id, file: f, status: 'uploading' }))
+      uploadFile(f)
+        .then((uploaded) => {
+          setPending((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'ready', fileId: uploaded.file_id } : p)))
+        })
+        .catch(() => {
+          setPending((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'error' } : p)))
+        })
+        .finally(() => {
+          addingRef.current -= 1
+        })
+    }
+  }
+
+  const removePending = (id: string) => setPending((prev) => prev.filter((p) => p.id !== id))
+
   const handleSend = () => {
     const t = text.trim()
-    if (!t) return
     if (editing) {
+      if (!t) return
       editMsg.mutate({ id: editing.id, text: t })
       setText('')
       return
     }
+    // нельзя отправить, пока что-то ещё грузится; нужно хотя бы что-то готовое
+    if (pending.some((p) => p.status === 'uploading')) return
+    if (!t && !pending.some((p) => p.status === 'ready')) return
     send.mutate({ text: t })
     setText('')
     setReplyTo(null)
@@ -256,12 +308,53 @@ export function ChatPage() {
       )}
 
       {/* Композер */}
-      <div className="flex items-end gap-2 border-t border-border bg-panel px-4 py-3">
-        <button title="Вложения (скоро)" className="rounded p-2 text-muted hover:bg-panel-2" disabled>
-          <Paperclip className="size-5" />
-        </button>
-        <textarea
-          value={text}
+      <div className="border-t border-border bg-panel px-4 py-3">
+        {/* Карточки готовящихся вложений */}
+        {pending.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pending.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center gap-2 rounded-lg border border-border bg-panel-2 px-2.5 py-1.5 text-xs"
+              >
+                <span>{p.status === 'error' ? '⚠️' : attachmentKind(p.file) === 'image' ? '🖼️' : '📎'}</span>
+                <span className="max-w-40 truncate">{p.file.name}</span>
+                <span className="text-muted">
+                  {p.status === 'uploading' ? 'загрузка…' : p.status === 'error' ? 'ошибка' : 'готово'}
+                </span>
+                {p.status !== 'uploading' && (
+                  <button onClick={() => removePending(p.id)} title="Убрать">
+                    <X className="size-3.5" />
+                  </button>
+                )}
+                {p.status === 'uploading' && <span className="h-3 w-3 animate-spin rounded-full border border-accent border-t-transparent" />}
+              </div>
+            ))}
+            {pending.length >= MAX_ATTACHMENTS && (
+              <span className="text-muted">максимум {MAX_ATTACHMENTS} вложений</span>
+            )}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <button
+            title="Прикрепить файл"
+            className="rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="size-5" />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              handleFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <textarea
+            value={text}
           onChange={(e) => {
             setText(e.target.value)
             maybeSendTyping(chatId)
@@ -278,11 +371,16 @@ export function ChatPage() {
         />
         <button
           onClick={handleSend}
-          disabled={!text.trim() || send.isPending}
+          disabled={
+            send.isPending ||
+            pending.some((p) => p.status === 'uploading') ||
+            (!text.trim() && !pending.some((p) => p.status === 'ready'))
+          }
           className="rounded-lg bg-accent p-2.5 text-white hover:bg-accent-hover disabled:opacity-40"
         >
           <Send className="size-5" />
         </button>
+        </div>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 /** Тонкий fetch-клиент /api/v1: Bearer из OIDC, 401 → silent renew → retry (§5). */
 
-import type { Chat, ChatDetails, Invite, InviteCreated, Message, User } from './types'
+import type { Chat, ChatDetails, FileOut, Invite, InviteCreated, Message, User } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -130,6 +130,45 @@ export const chatsApi = {
   read: (id: string, messageId: string) => api.post<void>(`/chats/${id}/read`, { message_id: messageId }),
 }
 
+// --- Files (upload-флоу §8: upload-url → presigned PUT → complete) ---
+
+export const filesApi = {
+  /** Presigned PUT + file_id (pending). sha256 — hex, считается клиентом (WebCrypto). */
+  uploadUrl: (size: number, mime: string, sha256: string) =>
+    api.post<{ file_id: string; upload_url: string; expires_in: number }>('/files/upload-url', {
+      size,
+      mime,
+      sha256,
+    }),
+  complete: (fileId: string) => api.post<FileOut>(`/files/${fileId}/complete`),
+  url: (fileId: string) => api.get<{ url: string; expires_in: number }>(`/files/${fileId}/url`),
+}
+
+export async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/** Полный upload-флоу §8: upload-url → PUT в Silo → complete → ready file_id. */
+export async function uploadFile(file: File): Promise<{ file_id: string; mime: string }> {
+  const buf = await file.arrayBuffer()
+  const sha256 = await sha256Hex(buf)
+  // браузер не всегда определяет mime (зависит от ОС) — бэкенд всё равно
+  // переопределяет его sniffing'ом при complete (§8, mime из клиента не доверенный)
+  const mime = file.type || 'application/octet-stream'
+  const { file_id, upload_url } = await filesApi.uploadUrl(file.size, mime, sha256)
+  const res = await fetch(upload_url, {
+    method: 'PUT',
+    body: buf,
+    headers: { 'Content-Type': mime },
+  })
+  if (!res.ok) throw new ApiError(res.status, `Silo upload failed: ${res.status}`)
+  await filesApi.complete(file_id)
+  return { file_id, mime }
+}
+
 // --- Messages ---
 
 export const messagesApi = {
@@ -137,7 +176,13 @@ export const messagesApi = {
     api.get<Message[]>(`/chats/${chatId}/messages`, query),
   send: (
     chatId: string,
-    payload: { text?: string; reply_to_id?: string; client_ref?: string; timezone?: string },
+    payload: {
+      text?: string
+      attachments?: { file_id: string; kind: 'image' | 'video' | 'file'; file_name: string }[]
+      reply_to_id?: string
+      client_ref?: string
+      timezone?: string
+    },
     idempotencyKey?: string,
   ) =>
     api.post<Message>(`/chats/${chatId}/messages`, payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined),

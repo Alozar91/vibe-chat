@@ -83,6 +83,18 @@ export interface InviteCreated extends Invite {
   code: string
 }
 
+export interface FileOut {
+  id: string
+  status: 'pending' | 'ready'
+  size_bytes: number
+  mime_type: string
+  real_mime_type: string | null
+  thumb_key: string | null
+  blurhash: string | null
+  sha256: string
+  created_at: string
+}
+
 /** WS-конверт (§9). */
 export type WsEvent =
   | { type: 'message.new'; data: { message: Message }; event_id: string; ts: number }

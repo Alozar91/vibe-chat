@@ -148,6 +148,9 @@ async def create_message(
         timezone=tz,
     )
     db.add(message)
+    # flush до attachments: между Message и Attachment нет relationship —
+    # без явного flush порядок INSERT в UoW не гарантирован (FK-ошибка, §7)
+    await db.flush()
     for attachment, _file_row in resolved:
         attachment.message_id = message.id
         db.add(attachment)
@@ -354,6 +357,7 @@ async def forward_message(
             timezone=await validate_timezone(actor.timezone),
         )
         db.add(copy)
+        await db.flush()  # attachments ссылаются на copy.id; relationship нет — порядок INSERT не гарантирован
         for attachment, file_row in source_attachments.get(source.id, []):
             db.add(
                 Attachment(
