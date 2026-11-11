@@ -11,6 +11,7 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-from app.api.v1 import health  # noqa: E402
+from app.api.v1 import health, users  # noqa: E402
 
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
