@@ -14,6 +14,9 @@ dependencies = [
     "valkey>=6.2",
     "boto3>=1.35",
     "pillow>=11.0",
+    "blurhash>=1.1",
+    "numpy>=2.0",
+    "tzdata>=2024.2",
     "uuid6>=2024.7.10",
     "pyjwt[crypto]>=2.10",
 ]
