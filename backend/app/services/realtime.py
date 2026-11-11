@@ -1,8 +1,9 @@
-"""Realtime: WS-события, tickets, read receipts (Docs/concept.md §9, §12).
+"""Realtime: WS-события, tickets, read receipts, бот-fanout (Docs/concept.md §9, §10, §12).
 
 Client→server по WS — только `typing`; все мутации через REST. Fanout —
 Valkey Pub/Sub (каналы chat:{id} и user:{id}). WS auth — одноразовые
-tickets (атомарное удаление GETDEL).
+tickets (атомарное удаление GETDEL). Ботам события доставляются в их
+персональные Valkey Streams: только message.new/edited/deleted (§10).
 """
 
 import json
@@ -11,8 +12,10 @@ from typing import Any
 from uuid import uuid4
 
 from app.core import valkey
+from app.models.bot import BotProfile
 from app.models.chat import ChatMember
 from app.models.message import Message
+from app.models.user import User
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +60,7 @@ async def publish_to_user(user_id: str, event_type: str, data: dict[str, Any]) -
 
 
 async def publish_message_new(db: AsyncSession, message: Message) -> None:
-    """message.new участникам чата (сериализация с URL — в роуте; здесь — ядро)."""
+    """message.new участникам чата (Pub/Sub) + ботам чата (Streams, §10)."""
     data: dict[str, Any] = {
         "id": message.id,
         "chat_id": message.chat_id,
@@ -69,22 +72,53 @@ async def publish_message_new(db: AsyncSession, message: Message) -> None:
         "created_at": message.created_at.isoformat() if message.created_at else None,
     }
     await publish_to_chat(message.chat_id, "message.new", data)
+    await fanout_to_bots(db, message.chat_id, "message.new", data)
 
 
-async def publish_message_edited(message: Message) -> None:
-    await publish_to_chat(
-        message.chat_id,
-        "message.edited",
-        {"id": message.id, "chat_id": message.chat_id, "text": message.text, "edited_at": _iso(message.edited_at)},
+async def publish_message_edited(db: AsyncSession, message: Message) -> None:
+    data: dict[str, Any] = {
+        "id": message.id,
+        "chat_id": message.chat_id,
+        "text": message.text,
+        "edited_at": _iso(message.edited_at),
+    }
+    await publish_to_chat(message.chat_id, "message.edited", data)
+    await fanout_to_bots(db, message.chat_id, "message.edited", data)
+
+
+async def publish_message_deleted(db: AsyncSession, message: Message) -> None:
+    data: dict[str, Any] = {
+        "id": message.id,
+        "chat_id": message.chat_id,
+        "deleted_at": _iso(message.deleted_at),
+    }
+    await publish_to_chat(message.chat_id, "message.deleted", data)
+    await fanout_to_bots(db, message.chat_id, "message.deleted", data)
+
+
+async def fanout_to_bots(
+    db: AsyncSession, chat_id: str, event_type: str, data: dict[str, Any]
+) -> None:
+    """Доставка события ботам-участникам чата в их Stream (§10).
+
+    Presence/typing ботам не доставляются — только message.*.
+    """
+    from app.services.bots import push_bot_event
+
+    bot_ids = (
+        (
+            await db.execute(
+                select(User.id)
+                .join(ChatMember, ChatMember.user_id == User.id)
+                .join(BotProfile, BotProfile.user_id == User.id)
+                .where(ChatMember.chat_id == chat_id, User.is_bot.is_(True))
+            )
+        )
+        .scalars()
+        .all()
     )
-
-
-async def publish_message_deleted(message: Message) -> None:
-    await publish_to_chat(
-        message.chat_id,
-        "message.deleted",
-        {"id": message.id, "chat_id": message.chat_id, "deleted_at": _iso(message.deleted_at)},
-    )
+    for bot_id in bot_ids:
+        await push_bot_event(bot_id, event_type, data)
 
 
 def _iso(dt: datetime | None) -> str | None:
