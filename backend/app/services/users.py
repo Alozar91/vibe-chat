@@ -13,9 +13,14 @@ async def upsert_user_by_sub(
     *,
     sub: str,
     preferred_username: str,
-    display_name: str | None = None,
 ) -> User:
     """Находит пользователя по keycloak_sub; при отсутствии — создаёт.
+
+    Keycloak — только идентификация/аутентификация (§5): персональные данные
+    (имя, фамилия, почта, display_name) из JWT не берутся и не обновляются —
+    они живут в системе и редактируются через PATCH /users/me. Из токена
+    используется только `preferred_username` как начальный username —
+    технический логин, не персональные данные.
 
     Коллизия username (уже занят другим sub) — суффикс (§6).
     """
@@ -37,7 +42,9 @@ async def upsert_user_by_sub(
             id=str(uuid4()),
             keycloak_sub=sub,
             username=username,
-            display_name=display_name or base_username,
+            # display_name по умолчанию = username; персональные поля (§5) — NULL,
+            # заполняются пользователем через PATCH /users/me
+            display_name=username,
             is_bot=False,
             is_platform_admin=False,
             is_active=True,

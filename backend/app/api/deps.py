@@ -29,7 +29,6 @@ async def current_user(
         db,
         sub=ctx.sub,
         preferred_username=ctx.preferred_username,
-        display_name=ctx.claims.get("name"),
     )
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "account deactivated")

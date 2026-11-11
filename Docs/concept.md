@@ -82,6 +82,14 @@ deploy/
 4. При первом входе бэкенд делает upsert локального пользователя по `sub` (см. §6).
 5. Refresh-токен живёт только во фронтенде (silent refresh), бэкенд его не видит.
 
+### Разграничение: аутентификация vs персональные данные
+Keycloak — **только identification/authentication**: он выдаёт стабильный `sub` и проверяет учётные данные (логин-пароль, в перспективе LDAP/Kerberos через федерацию). Все персональные данные пользователя — имя, фамилия, почта, отображаемое имя, аватар, часовой пояс — **хранятся и редактируются на уровне системы** (PostgreSQL vibe-chat, профиль через `PATCH /users/me`):
+
+- Из JWT-клеймов не берётся ничего персонального: ни `name`, ни `given_name`/`family_name`, ни `email`. Клейм `preferred_username` используется только как **начальный** `username` при первом upsert (технический логин, не персональные данные) и дальше живёт в БД.
+- Данные Keycloak и vibe-chat не синхронизируются: смена имени/почты в Keycloak не меняет профиль в системе и наоборот.
+- Следствие: в realm Keycloak не заводится персональных атрибутов сверх стандартного профиля OIDC; федерация LDAP/Kerberos (§5 «Будущее») продолжает отвечать только за аутентификацию — `sub` стабилен, персональные данные остаются в БД системы.
+- До профиля ключевые клеймы JWT: `sub`, `exp`, `iss`, `aud`. Остальные клеймы игнорируются.
+
 ### WebSocket auth
 Токен в query-параметре — плохая практика. Схема:
 1. `POST /api/v1/ws/ticket` с JWT → одноразовый ticket (TTL 30 сек, хранится в Valkey).
@@ -100,7 +108,7 @@ deploy/
 
 ### Таблицы
 
-**users** — `id` UUID PK, `keycloak_sub` UUID UNIQUE NULLABLE (NULL у ботов — они не проходят через Keycloak), `username` UNIQUE (при коллизии при upsert — суффикс), `display_name`, `avatar_file_id` → files, `is_bot` bool, `is_platform_admin` bool (платформенный админ: управление ботами; в MVP — первый seed-пользователь), `time_display` enum(`browser`,`as_sent`,`fixed`,`utc`, default `browser`) — режим отображения времени (см. «Время и часовые пояса»), `timezone` IANA-имя NULLABLE (пояс для режима `fixed`; также определяет эффективный пояс отправителя при записи сообщений), `is_active`, `created_at`, `last_seen_at` NULLABLE (момент закрытия последнего WS-соединения — источник last_seen в presence-событиях; у ботов и ни разу не подключавшихся — NULL).
+**users** — `id` UUID PK, `keycloak_sub` UUID UNIQUE NULLABLE (NULL у ботов — они не проходят через Keycloak; идентификация/аутентификация — Keycloak §5, персональные данные — здесь), `username` UNIQUE (при коллизии при upsert — суффикс), `display_name`, `first_name` NULLABLE, `last_name` NULLABLE, `email` NULLABLE (персональные данные живут только здесь, из JWT не берутся — §5), `avatar_file_id` → files, `is_bot` bool, `is_platform_admin` bool (платформенный админ: управление ботами; в MVP — первый seed-пользователь; признак хранится в БД, из клеймов JWT не берётся), `time_display` enum(`browser`,`as_sent`,`fixed`,`utc`, default `browser`) — режим отображения времени (см. «Время и часовые пояса»), `timezone` IANA-имя NULLABLE (пояс для режима `fixed`; также определяет эффективный пояс отправителя при записи сообщений), `is_active`, `created_at`, `last_seen_at` NULLABLE (момент закрытия последнего WS-соединения — источник last_seen в presence-событиях; у ботов и ни разу не подключавшихся — NULL).
 
 **bot_profiles** — `user_id` PK/FK→users, `owner_user_id` (кто создал), `description`, `token_hash` (только sha256), `miniapp_url`, `miniapp_name` (каркас под mini-apps), `webhook_url` (post-MVP).
 
@@ -242,7 +250,7 @@ Auth handoff:
 ```
 # Пользователи
 GET    /users/me
-PATCH  /users/me                   # display_name, аватар, time_display, timezone
+PATCH  /users/me                   # display_name, first_name, last_name, email, аватар, time_display, timezone — персональные данные только здесь (§5)
 GET    /users?q=                   # поиск (люди и боты, флаг is_bot в ответе) для чатов/участников
 GET    /users/{id}
 
