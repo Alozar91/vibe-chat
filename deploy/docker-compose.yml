@@ -12,7 +12,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # postgres:18+ хранит данные в /var/lib/postgresql/<major>/... — монтируем родителя
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vibe}"]
       interval: 5s

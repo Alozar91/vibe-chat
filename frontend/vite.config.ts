@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // dev: REST и WS — через vite proxy на backend (Docs/concept.md §13)
       '/api/v1': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8010',
         ws: true,
       },
     },
