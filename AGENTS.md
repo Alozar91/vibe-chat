@@ -18,6 +18,9 @@
 - **Realtime:** WebSocket + Valkey Pub/Sub
 - **Деплой:** Docker Compose, монорепо `backend/` + `frontend/` + `Docs/` + `deploy/`
 
+### Регистрация (инвайт-коды)
+- Коды multi-use выдаёт платформенный админ (`max_uses` NULL = безлимит, опциональный срок, деактивация); в БД только sha256-хэш. `POST /auth/register` (без аутентификации): код + username + пароль + персональные данные → последние только в PostgreSQL. KC-аккаунт через Admin API (client `backend-admin`, client_credentials) — только username+password; `registrationAllowed` KC остаётся false. Без `APP_KEYCLOAK_ADMIN_CLIENT_SECRET` — 503 (§5, §12).
+
 ## Ключевые архитектурные решения
 
 - Бэкенд не выдаёт токены — только валидирует JWT Keycloak'а (JWKS, iss/aud/exp). Единственное исключение — скоупед opaque-токены `mat_…` для mini-apps (Docs/concept.md §11).

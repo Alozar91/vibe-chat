@@ -90,6 +90,16 @@ Keycloak — **только identification/authentication**: он выдаёт �
 - Следствие: в realm Keycloak не заводится персональных атрибутов сверх стандартного профиля OIDC; федерация LDAP/Kerberos (§5 «Будущее») продолжает отвечать только за аутентификацию — `sub` стабилен, персональные данные остаются в БД системы.
 - До профиля ключевые клеймы JWT: `sub`, `exp`, `iss`, `aud`. Остальные клеймы игнорируются.
 
+### Регистрация пользователей (инвайт-коды)
+Штатная self-registration Keycloak **выключена** (`registrationAllowed: false`) — её форма собирает персональные данные в KC, что нарушает разграничение выше. Регистрация — **инвайт-кодами**, реализуется на бэкенде/фронтенде системы:
+
+- Коды выдаёт **платформенный админ** (`POST /invites`). Код **multi-use**: `max_uses` (NULL = безлимит — «дверной» код на отдел) + опциональный `expires_at`; можно деактивировать (`POST /invites/{id}/deactivate`). В БД хранится только sha256-хэш кода; сам код показывается один раз при создании (как токен бота).
+- Форма регистрации — на фронтенде vibe-chat (`POST /auth/register`, без аутентификации): инвайт-код, username, пароль **и персональные данные** (имя, фамилия, email, display_name) — последние сразу пишутся в PostgreSQL системы.
+- Аккаунт в Keycloak создаёт бэкенд через **Admin API** (service-account client `backend-admin` с ролью `realm-management/manage-users`, grant `client_credentials`) — передаются **только username + password**, без `firstName`/`lastName`/`email`.
+- Порядок: проверка кода (активен/не истёк/не исчерпан) → username свободен → создание в KC (409 KC → 409 клиенту; недоступен → 502) → **атомарное потребление кода** (conditional `UPDATE … WHERE uses_count < max_uses`; проигравший гонку получает компенсирующее удаление KC-аккаунта) + создание локального пользователя — в одной транзакции.
+- Первый вход после регистрации — обычный OIDC-логин: JWT → JIT upsert находит уже созданного пользователя по `sub`, персональные данные сохраняются. Пароль проверяет Keycloak (политика паролей — настройка realm'а, локально минимум 8 символов).
+- Без настроенного `APP_KEYCLOAK_ADMIN_CLIENT_SECRET` регистрация отвечает 503 (не настроена).
+
 ### WebSocket auth
 Токен в query-параметре — плохая практика. Схема:
 1. `POST /api/v1/ws/ticket` с JWT → одноразовый ticket (TTL 30 сек, хранится в Valkey).
@@ -109,6 +119,8 @@ Keycloak — **только identification/authentication**: он выдаёт �
 ### Таблицы
 
 **users** — `id` UUID PK, `keycloak_sub` UUID UNIQUE NULLABLE (NULL у ботов — они не проходят через Keycloak; идентификация/аутентификация — Keycloak §5, персональные данные — здесь), `username` UNIQUE (при коллизии при upsert — суффикс), `display_name`, `first_name` NULLABLE, `last_name` NULLABLE, `email` NULLABLE (персональные данные живут только здесь, из JWT не берутся — §5), `avatar_file_id` → files, `is_bot` bool, `is_platform_admin` bool (платформенный админ: управление ботами; в MVP — первый seed-пользователь; признак хранится в БД, из клеймов JWT не берётся), `time_display` enum(`browser`,`as_sent`,`fixed`,`utc`, default `browser`) — режим отображения времени (см. «Время и часовые пояса»), `timezone` IANA-имя NULLABLE (пояс для режима `fixed`; также определяет эффективный пояс отправителя при записи сообщений), `is_active`, `created_at`, `last_seen_at` NULLABLE (момент закрытия последнего WS-соединения — источник last_seen в presence-событиях; у ботов и ни разу не подключавшихся — NULL).
+
+**invites** — `id` UUID PK, `code_hash` UNIQUE (sha256; сам код `vh_…` показывается один раз при создании), `created_by` → users (платформенный админ), `max_uses` INT NULLABLE (NULL = безлимит), `uses_count` INT (default 0), `expires_at` NULLABLE, `deactivated_at` NULLABLE, `created_at`. Потребление — атомарно (conditional UPDATE, §5 «Регистрация»).
 
 **bot_profiles** — `user_id` PK/FK→users, `owner_user_id` (кто создал), `description`, `token_hash` (только sha256), `miniapp_url`, `miniapp_name` (каркас под mini-apps), `webhook_url` (post-MVP).
 
@@ -249,10 +261,16 @@ Auth handoff:
 
 ```
 # Пользователи
+POST   /auth/register              # инвайт-регистрация: {invite_code, username, password, персональные данные} (§5) — без аутентификации
 GET    /users/me
 PATCH  /users/me                   # display_name, first_name, last_name, email, аватар, time_display, timezone — персональные данные только здесь (§5)
 GET    /users?q=                   # поиск (люди и боты, флаг is_bot в ответе) для чатов/участников
 GET    /users/{id}
+
+# Инвайты (платформенный админ)
+POST   /invites                    # {max_uses?, expires_at?} → {code} (код показывается один раз)
+GET    /invites                    # список с uses_count
+POST   /invites/{id}/deactivate
 
 # Чаты
 POST   /chats                      # групповой; {title, member_ids[]} (creator = owner; member_ids ≥ 1, creator в списке игнорируется, боты допустимы)
@@ -334,6 +352,7 @@ POST   /miniapps/token             # обмен кода на mat_-токен
 8. Каркас mini-apps (без UI).
 9. Реакции на сообщения: таблица `reactions`, toggle-API, WS-событие `reaction.updated`, UI-панель (решено 2026-11-11).
 10. Фронтенд: логин Keycloak, список чатов, лента сообщений (вложения, реакции, цитирование, пересылка), realtime (WS + догоняние), настройки профиля (time_display/timezone).
+11. Инвайт-регистрация: multi-use коды платформенного админа, `POST /auth/register`, создание KC-аккаунта через Admin API (только username+password), персональные данные — в системе (§5).
 
 **Post-MVP:** инлайн-видео, вебхуки ботов, mini-apps (UI + запуск), LDAP/Kerberos (федерация Keycloak), поиск по сообщениям (PG full-text), аудио/видео звонки (WebRTC + SFU), мобильные приложения, push-уведомления.
 
