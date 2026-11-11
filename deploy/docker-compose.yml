@@ -69,6 +69,8 @@ services:
       APP_KEYCLOAK_URL: http://keycloak:8080
       APP_KEYCLOAK_REALM: vibe-chat
       APP_KEYCLOAK_AUDIENCE: backend-api
+      APP_KEYCLOAK_ADMIN_CLIENT_ID: backend-admin
+      APP_KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
     depends_on:
       postgres:
         condition: service_healthy

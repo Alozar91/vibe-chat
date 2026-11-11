@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     keycloak_url: str = "http://localhost:8080"
     keycloak_realm: str = "vibe-chat"
     keycloak_audience: str = "backend-api"
+    # Admin API для инвайт-регистрации (§5): confidential client с ролью
+    # realm-management/manage-users; пусто — регистрация выключена (503)
+    keycloak_admin_client_id: str = "backend-admin"
+    keycloak_admin_client_secret: str = ""
 
     # Файлы
     presign_ttl_seconds: int = 3600

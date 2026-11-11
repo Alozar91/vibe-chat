@@ -25,10 +25,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from app.api.v1 import bots, chats, health, messages, miniapps, realtime, users  # noqa: E402
+from app.api.v1 import bots, chats, health, invites, messages, miniapps, realtime, users  # noqa: E402
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(invites.router, prefix="/api/v1")
+app.include_router(invites.admin_router, prefix="/api/v1")
 app.include_router(chats.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
 app.include_router(messages.files_router, prefix="/api/v1")

@@ -56,6 +56,20 @@
       "publicClient": false,
       "bearerOnly": true,
       "secret": "backend-api-secret-not-used"
+    },
+    {
+      "clientId": "backend-admin",
+      "name": "Vibe Chat Backend Admin API (invite registration, §5)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "change-me-backend-admin-secret",
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
     }
   ],
   "clientScopes": [
@@ -77,6 +91,14 @@
           }
         }
       ]
+    }
+  ],
+  "serviceAccounts": [
+    {
+      "clientId": "backend-admin",
+      "clientRoles": {
+        "realm-management": ["manage-users"]
+      }
     }
   ]
 }
