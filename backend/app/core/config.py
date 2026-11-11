@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     presign_ttl_seconds: int = 3600
     file_pending_ttl_hours: int = 24
     file_orphan_days: int = 7
+    max_file_size_bytes: int = 100 * 1024 * 1024  # 100 МБ (§7 — конфигом)
+
+    # Сообщения
+    edit_window_hours: int = 24  # окно редактирования (§6)
 
 
 @lru_cache
