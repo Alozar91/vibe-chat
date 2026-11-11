@@ -1,12 +1,13 @@
 """Сообщения и файлы: REST-роуты (Docs/concept.md §12)."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from app.api.deps import UserDep
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.file import File
+from app.models.message import Attachment, Message
 from app.schemas.message import (
     FileOut,
     FileUrlOut,
@@ -14,13 +15,16 @@ from app.schemas.message import (
     MessageCreateIn,
     MessageEditIn,
     MessageOut,
+    ReactionGroupOut,
     UploadUrlIn,
     UploadUrlOut,
 )
 from app.services import files as file_service
 from app.services import messages as message_service
+from app.services import reactions as reaction_service
 from app.services import realtime as rt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["messages"])
@@ -34,6 +38,26 @@ MAX_FILE_SIZE = 100 * 1024 * 1024
 def _client_ref(idempotency_key: str | None, body_ref: str | None) -> str | None:
     """Идемпотентность: заголовок приоритетнее тела (§6)."""
     return idempotency_key or body_ref
+
+
+async def _serialize_many(
+    db: AsyncSession,
+    messages: list[Message],
+    attachments: dict[str, list[tuple[Attachment, File]]],
+    reactions_map: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[MessageOut]:
+    """Сериализация списка с реакциями (§6): batch-загрузка, N+1 нет."""
+    if reactions_map is None:
+        reactions_map = await reaction_service.list_reactions(db, [m.id for m in messages])
+    return [
+        MessageOut.model_validate(
+            message_service.serialize_message(
+                m, attachments.get(m.id, []), reactions_map.get(m.id, [])
+            ),
+            from_attributes=True,
+        )
+        for m in messages
+    ]
 
 
 @router.get("/chats/{chat_id}/messages", response_model=list[MessageOut])
@@ -58,13 +82,7 @@ async def list_messages(
         limit=limit,
     )
     attachments = await message_service.load_attachments(db, [m.id for m in messages])
-    return [
-        MessageOut.model_validate(
-            message_service.serialize_message(m, attachments.get(m.id, [])),
-            from_attributes=True,
-        )
-        for m in messages
-    ]
+    return await _serialize_many(db, messages, attachments)
 
 
 @router.post("/chats/{chat_id}/messages", response_model=MessageOut, status_code=201)
@@ -89,10 +107,8 @@ async def send_message(
     # message.new → участникам через Valkey Pub/Sub (§9); повтор идемпотентного
     # запроса события не дублирует смысл (клиенты дедуплицируют по id, §9)
     await rt.publish_message_new(db, message)
-    return MessageOut.model_validate(
-        message_service.serialize_message(message, attachments.get(message.id, [])),
-        from_attributes=True,
-    )
+    out = await _serialize_many(db, [message], attachments)
+    return out[0]
 
 
 @router.patch("/messages/{message_id}", response_model=MessageOut)
@@ -100,20 +116,16 @@ async def edit_message(message_id: str, body: MessageEditIn, me: UserDep, db: Db
     message = await message_service.edit_message(db, message_id=message_id, actor=me, new_text=body.text)
     attachments = await message_service.load_attachments(db, [message.id])
     await rt.publish_message_edited(db, message)
-    return MessageOut.model_validate(
-        message_service.serialize_message(message, attachments.get(message.id, [])),
-        from_attributes=True,
-    )
+    out = await _serialize_many(db, [message], attachments)
+    return out[0]
 
 
 @router.delete("/messages/{message_id}", response_model=MessageOut)
 async def delete_message(message_id: str, me: UserDep, db: DbDep) -> MessageOut:
     message = await message_service.delete_message(db, message_id=message_id, actor=me)
     await rt.publish_message_deleted(db, message)
-    return MessageOut.model_validate(
-        message_service.serialize_message(message, []),  # deleted: заглушка без вложений
-        from_attributes=True,
-    )
+    # deleted: заглушка без вложений и реакций (§6 — реакции скрыты надгробием)
+    return MessageOut.model_validate(message_service.serialize_message(message, [], []))
 
 
 @router.post("/messages/{message_id}/forward", response_model=list[MessageOut], status_code=201)
@@ -132,12 +144,36 @@ async def forward_message(
         client_ref=_client_ref(idempotency_key, None),
     )
     attachments = await message_service.load_attachments(db, [m.id for m in copies])
-    return [
-        MessageOut.model_validate(
-            message_service.serialize_message(m, attachments.get(m.id, [])), from_attributes=True
-        )
-        for m in copies
-    ]
+    return await _serialize_many(db, copies, attachments)
+
+
+# --- Реакции (§6, §12) ---
+
+
+class ReactionPutIn(BaseModel):
+    """PUT /messages/{id}/reactions — {emoji} из фиксированного набора (§6)."""
+
+    emoji: str
+
+
+@router.put("/messages/{message_id}/reactions", response_model=list[ReactionGroupOut])
+async def put_reaction(message_id: str, body: ReactionPutIn, me: UserDep, db: DbDep) -> list[ReactionGroupOut]:
+    """Toggle реакции (§6): та же — снять, другая — заменить, нет — поставить.
+
+    Ответ — актуальный список реакций сообщения; всем участникам уходит
+    WS-событие reaction.updated (§9).
+    """
+    reactions_map = await reaction_service.set_reaction(
+        db, message_id=message_id, user_id=me.id, emoji=body.emoji
+    )
+    message = await message_service.get_message_checked(db, message_id)
+    groups = reactions_map.get(message_id, [])
+    await rt.publish_to_chat(message.chat_id, "reaction.updated", {
+        "message_id": message_id,
+        "chat_id": message.chat_id,
+        "reactions": groups,
+    })
+    return [ReactionGroupOut.model_validate(g) for g in groups]
 
 
 # --- Файлы (§8) ---

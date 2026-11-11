@@ -156,8 +156,16 @@ async def create_message(
     return message, True
 
 
-def serialize_message(message: Message, attachments: list[tuple[Attachment, File]]) -> dict[str, Any]:
-    """Сериализация с встроенными presigned URL (§8). Soft-deleted — заглушка без вложений."""
+def serialize_message(
+    message: Message,
+    attachments: list[tuple[Attachment, File]],
+    reactions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Сериализация с встроенными presigned URL (§8). Soft-deleted — заглушка без вложений.
+
+    Реакции передаются готовым списком [{emoji, user_ids}] (§6) — загрузка batch'ем в роуте.
+    Удалённые сообщения скрывают реакции (надгробие), не удаляя их строки (§6).
+    """
     deleted = message.deleted_at is not None
     return {
         "id": message.id,
@@ -176,6 +184,7 @@ def serialize_message(message: Message, attachments: list[tuple[Attachment, File
         "timezone": message.timezone,
         "edited_at": message.edited_at.isoformat() if message.edited_at else None,
         "deleted_at": message.deleted_at.isoformat() if message.deleted_at else None,
+        "reactions": [] if deleted else (reactions or []),
         "attachments": []
         if deleted
         else [

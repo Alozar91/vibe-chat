@@ -61,6 +61,13 @@ class AttachmentOut(BaseModel):
     thumb_url: str | None = None
 
 
+class ReactionGroupOut(BaseModel):
+    """Группа реакций одного emoji на сообщении (§6)."""
+
+    emoji: str
+    user_ids: list[str]
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -81,6 +88,7 @@ class MessageOut(BaseModel):
     edited_at: datetime | None
     deleted_at: datetime | None
     attachments: list[AttachmentOut]
+    reactions: list[ReactionGroupOut] = []  # §6; system/удалённые — пусто
 
 
 class UploadUrlIn(BaseModel):

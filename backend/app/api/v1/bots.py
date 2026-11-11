@@ -17,6 +17,7 @@ from app.schemas.message import MessageOut
 from app.services import bots as bot_service
 from app.services import chats as chat_service
 from app.services import messages as message_service
+from app.services import reactions as reaction_service
 from app.services import realtime as rt
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,8 +131,13 @@ async def bot_chat_messages(
         db, chat_id=chat_id, user_id=user.id, before=before, after=after, limit=limit
     )
     attachments = await message_service.load_attachments(db, [m.id for m in messages])
+    reactions = await reaction_service.list_reactions(db, [m.id for m in messages])
     return [
-        MessageOut.model_validate(message_service.serialize_message(m, attachments.get(m.id, [])))
+        MessageOut.model_validate(
+            message_service.serialize_message(
+                m, attachments.get(m.id, []), reactions.get(m.id, [])
+            )
+        )
         for m in messages
     ]
 
