@@ -149,7 +149,7 @@ files_router = APIRouter(tags=["files"])
 @files_router.post("/files/upload-url", response_model=UploadUrlOut, status_code=201)
 async def create_upload_url(body: UploadUrlIn, me: UserDep, db: DbDep) -> UploadUrlOut:
     if body.size > MAX_FILE_SIZE:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "file too large")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "file too large")
     file_id = file_service.new_file_id()
     storage_key = file_service.new_storage_key(file_id)
     file_row = File(

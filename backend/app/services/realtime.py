@@ -140,7 +140,7 @@ async def mark_read(db: AsyncSession, *, chat_id: str, user_id: str, message_id:
     await require_member(db, chat_id, user_id)
     msg = await db.get(Message, message_id)
     if msg is None or msg.chat_id != chat_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "message not in this chat")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "message not in this chat")
 
     current = await db.scalar(
         select(ChatMember.last_read_message_id).where(

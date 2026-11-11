@@ -57,9 +57,9 @@ async def _validate_reply_target(db: AsyncSession, chat_id: str, reply_to_id: st
         return
     target = await db.get(Message, reply_to_id)
     if target is None or target.chat_id != chat_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "reply_to must be in the same chat")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reply_to must be in the same chat")
     if target.type == "system":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "cannot reply to system message")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "cannot reply to system message")
 
 
 async def _resolve_attachments(
@@ -70,12 +70,12 @@ async def _resolve_attachments(
     for item in items:
         kind = item["kind"]
         if kind not in _KNOWN_KINDS:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown attachment kind: {kind}")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"unknown attachment kind: {kind}")
         file_row = await db.get(File, item["file_id"])
         if file_row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"file {item['file_id']} not found")
         if file_row.status != "ready":
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "file not completed (pending)")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "file not completed (pending)")
         if file_row.uploader_id != uploader_id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "file belongs to another user")
         real = file_row.real_mime_type or file_row.mime_type
@@ -84,7 +84,7 @@ async def _resolve_attachments(
             expected = "file"  # SVG — не image (§8)
         if kind != expected:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 f"kind '{kind}' does not match real mime '{real}' (expected '{expected}')",
             )
         attachment = Attachment(
@@ -118,7 +118,7 @@ async def create_message(
     """
     await chat_service.require_member(db, chat_id, sender.id)
     if not text and not attachments:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "text or attachments required")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "text or attachments required")
 
     if client_ref:
         existing = (
@@ -243,13 +243,13 @@ async def edit_message(
         await db.scalars(select(Attachment.id).where(Attachment.message_id == message.id))
     ).first()
     if has_attachments is not None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "messages with attachments cannot be edited")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "messages with attachments cannot be edited")
     if message.edited_at is not None and _as_aware(message.edited_at) < _now() - timedelta(
         hours=edit_window_hours
     ):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "edit window expired")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "edit window expired")
     if _as_aware(message.created_at) < _now() - timedelta(hours=edit_window_hours):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "edit window expired")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "edit window expired")
     message.text = new_text
     message.edited_at = _now()
     message.updated_at = _now()
