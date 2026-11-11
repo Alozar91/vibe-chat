@@ -21,12 +21,15 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 @pytest.mark.asyncio
 async def test_first_login_creates(db_session: AsyncSession) -> None:
-    user = await upsert_user_by_sub(
-        db_session, sub="sub-1", preferred_username="alice", display_name="Alice"
-    )
+    """Первый вход: username от preferred_username; display_name = username;
+    персональные поля NULL — из JWT-клеймов ничего не берётся (§5)."""
+    user = await upsert_user_by_sub(db_session, sub="sub-1", preferred_username="alice")
     assert user.keycloak_sub == "sub-1"
     assert user.username == "alice"
-    assert user.display_name == "Alice"
+    assert user.display_name == "alice"
+    assert user.first_name is None
+    assert user.last_name is None
+    assert user.email is None
 
 
 @pytest.mark.asyncio

@@ -29,13 +29,18 @@ MAT_PREFIX = "mat_"
 
 
 class AuthContext:
-    """Аутентифицированный доступ: JWT Keycloak (человек) или mat_-сессия (mini-app, §11)."""
+    """Аутентифицированный доступ: JWT Keycloak (человек) или mat_-сессия (mini-app, §11).
+
+    Keycloak — только identification/authentication (§5): из клеймов берутся
+    лишь идентификационные `sub` и `preferred_username` (начальный логин при
+    первом upsert). Персональные данные (name, email и т.п.) из JWT не читаются —
+    они живут в PostgreSQL системы и редактируются через PATCH /users/me.
+    """
 
     def __init__(self, claims: dict[str, Any]) -> None:
         self.claims = claims
         self.sub: str = claims["sub"]
         self.preferred_username: str = claims.get("preferred_username", f"user-{self.sub[:8]}")
-        self.is_platform_admin: bool = bool(claims.get("is_platform_admin", False))
         # mat_-сессия (§11): заполнена только при handoff-токене mini-app
         self.mat_user_id: str | None = None
         self.mat_bot_id: str | None = None

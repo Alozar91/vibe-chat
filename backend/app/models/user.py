@@ -14,6 +14,10 @@ class User(Base):
     keycloak_sub: Mapped[str | None] = mapped_column(String(36), unique=True, nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(255), unique=True)
     display_name: Mapped[str] = mapped_column(String(255))
+    # Персональные данные — только в системе (§5), из JWT-клеймов не берутся
+    first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     avatar_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     is_bot: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
