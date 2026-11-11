@@ -67,7 +67,7 @@ async def create_group(
 async def create_or_get_direct(db: AsyncSession, *, me_id: str, other_id: str) -> tuple[Chat, bool]:
     """Direct: пара не может породить два чата (direct_chat_keys, §6). Self-chat — 422 (§6)."""
     if me_id == other_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "self-chat not supported in MVP")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "self-chat not supported in MVP")
     await _get_active_user(db, other_id)
 
     user_a, user_b = _sorted_pair(me_id, other_id)
@@ -128,7 +128,7 @@ async def transfer_ownership(db: AsyncSession, *, chat_id: str, actor_id: str, n
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner role required")
     new_owner = await require_member(db, chat_id, new_owner_id)
     if new_owner.user_id == actor_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "already owner")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "already owner")
     actor.role = "admin"
     new_owner.role = "owner"
     await db.commit()

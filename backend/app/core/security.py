@@ -1,6 +1,7 @@
 """Валидация JWT Keycloak: JWKS, iss/aud/exp (Docs/concept.md §5).
 
-Бэкенд не выдаёт токены — только валидирует. Исключение — mat_-токены mini-apps (§11), не здесь.
+Бэкенд не выдаёт токены — только валидирует. Единственное исключение —
+mat_-токены mini-apps (§11): opaque, сессия в Valkey, распознаются здесь.
 """
 
 import time
@@ -24,18 +25,50 @@ _jwks_client = PyJWKClient(
 _ISSUER = f"{settings.keycloak_url}/realms/{settings.keycloak_realm}"
 _AUDIENCE = settings.keycloak_audience
 
+MAT_PREFIX = "mat_"
+
 
 class AuthContext:
-    """Аутентифицированный пользователь (человек) из JWT."""
+    """Аутентифицированный доступ: JWT Keycloak (человек) или mat_-сессия (mini-app, §11)."""
 
     def __init__(self, claims: dict[str, Any]) -> None:
         self.claims = claims
         self.sub: str = claims["sub"]
         self.preferred_username: str = claims.get("preferred_username", f"user-{self.sub[:8]}")
         self.is_platform_admin: bool = bool(claims.get("is_platform_admin", False))
+        # mat_-сессия (§11): заполнена только при handoff-токене mini-app
+        self.mat_user_id: str | None = None
+        self.mat_bot_id: str | None = None
+
+    @property
+    def is_miniapp(self) -> bool:
+        return self.mat_user_id is not None
 
     def __repr__(self) -> str:  # pragma: no cover
-        return f"AuthContext(sub={self.sub!r})"
+        return f"AuthContext(sub={self.sub!r}, miniapp={self.is_miniapp})"
+
+
+class MatContext:
+    """Результат resolve mat_-токена: от имени кого и внутри какого miniapp (§11)."""
+
+    def __init__(self, user_id: str, bot_id: str) -> None:
+        self.user_id = user_id
+        self.bot_id = bot_id
+
+
+async def _resolve_mat(credentials_token: str) -> AuthContext | None:
+    """mat_-токен → AuthContext с mat-полями; не найден/истёк → None (→ 401)."""
+    from app.services.miniapps import MAT_PREFIX, resolve_mat_token
+
+    if not credentials_token.startswith(MAT_PREFIX):
+        return None
+    session = await resolve_mat_token(credentials_token)
+    if session is None:
+        return None
+    ctx = AuthContext(claims={"sub": session["user_id"], "preferred_username": "miniapp"})
+    ctx.mat_user_id = str(session["user_id"])
+    ctx.mat_bot_id = str(session["bot_id"])
+    return ctx
 
 
 def validate_jwt(token: str) -> dict[str, Any]:
@@ -59,9 +92,15 @@ def validate_jwt(token: str) -> dict[str, Any]:
 async def require_auth(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> AuthContext:
-    """Зависимость FastAPI: Bearer JWT → AuthContext."""
+    """Зависимость FastAPI: Bearer JWT → AuthContext; mat_-токен → mat-сессия (§11).
+
+    mat_-токен, которого нет в Valkey (истёк 15-минутный TTL) — 401 сразу.
+    """
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing bearer token")
+    mat_ctx = await _resolve_mat(credentials.credentials)
+    if mat_ctx is not None:
+        return mat_ctx
     claims = validate_jwt(credentials.credentials)
     return AuthContext(claims)
 

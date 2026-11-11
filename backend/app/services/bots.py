@@ -107,8 +107,15 @@ async def update_bot(
     description_set: bool = False,
     miniapp_set: bool = False,
 ) -> tuple[User, BotProfile]:
-    """PATCH /bots/{id}: description, is_active, miniapp-поля (§12)."""
+    """PATCH /bots/{id}: description, is_active, miniapp-поля (§12).
+
+    miniapp_url — только HTTPS (§11).
+    """
     await require_platform_admin(admin)
+    if miniapp_set:
+        url = (miniapp_url or "").strip()
+        if url and not url.startswith("https://"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "miniapp_url must be https")
     bot_user, profile = await get_bot(db, bot_id)
     if description_set:
         profile.description = description
