@@ -280,7 +280,14 @@ async def test_send_publishes_message_new(
         r = await c.post(f"/api/v1/chats/{chat_id}/messages", json={"text": "привет"})
         assert r.status_code == 201
         events = [json.loads(payload) for ch, payload in fake_valkey.published if ch == f"chat:{chat_id}"]
-        assert any(e["type"] == "message.new" and e["data"]["id"] == r.json()["id"] for e in events)
+        mine = [e for e in events if e["type"] == "message.new"]
+        assert mine and all("message" in e["data"] and "id" in e["data"]["message"] for e in mine)
+        assert any(
+            e["data"]["message"]["id"] == r.json()["id"]
+            and e["data"]["message"]["text"] == "привет"
+            and "reactions" in e["data"]["message"]  # полная сериализация (§9, этап 10.2)
+            for e in mine
+        )
 
 
 @pytest.mark.asyncio

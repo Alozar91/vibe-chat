@@ -119,7 +119,8 @@ export const chatsApi = {
   get: (id: string) => api.get<ChatDetails>(`/chats/${id}`),
   createGroup: (title: string, memberIds: string[]) =>
     api.post<Chat>('/chats', { title, member_ids: memberIds }),
-  createDirect: (userId: string) => api.post<Chat>('/chats/direct', { user_id: userId }),
+  // бэкенд отвечает {chat_id, created} (§12) — не Chat
+  createDirect: (userId: string) => api.post<{ chat_id: string; created: boolean }>('/chats/direct', { user_id: userId }),
   rename: (id: string, title: string) => api.patch<Chat>(`/chats/${id}`, { title }),
   delete: (id: string) => api.delete<void>(`/chats/${id}`),
   addMembers: (id: string, memberIds: string[]) =>

@@ -88,6 +88,36 @@ async def _ws_receive_loop(user: User, chat_ids: set[str], websocket: WebSocket)
                 await rt.publish_to_chat(chat_id, "typing", {"chat_id": chat_id, "user_id": user.id})
 
 
+async def _notify_chatmates(db: AsyncSession, user: User, *, online: bool) -> None:
+    """presence (§9) соседям по чатам: user:{id} каждого, без самого пользователя.
+
+    Прежняя реализация публиковала presence в собственный канал — онлайн-статус
+    не видел никто, кроме самого пользователя (этап 10.2).
+    """
+    mate_ids = set(
+        (
+            await db.execute(
+                select(ChatMember.user_id)
+                .where(
+                    ChatMember.chat_id.in_(
+                        select(ChatMember.chat_id).where(ChatMember.user_id == user.id)
+                    ),
+                    ChatMember.user_id != user.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    payload = {
+        "user_id": user.id,
+        "online": online,
+        "last_seen_at": user.last_seen_at.isoformat() if user.last_seen_at else None,
+    }
+    for uid in mate_ids:
+        await rt.publish_to_user(uid, "presence", payload)
+
+
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket, user: WsUserDep, db: DbDep) -> None:
     await websocket.accept()
@@ -101,7 +131,9 @@ async def ws_endpoint(websocket: WebSocket, user: WsUserDep, db: DbDep) -> None:
     channels = [f"user:{user.id}"] + [f"chat:{cid}" for cid in chat_ids]
     pubsub = await valkey.subscribe_channels(*channels)
     await valkey.presence_connect(user.id)
-    await rt.publish_to_user(user.id, "presence", {"user_id": user.id, "online": True})
+    # presence (§9) — «соседям по чатам» (в user:{id} каждого), не себе: онлайн-статус
+    # виден в шапке чата и у списка. offline — только когда закрыта последняя вкладка.
+    await _notify_chatmates(db, user, online=True)
 
     pubsub_task = asyncio.create_task(_pump_pubsub(pubsub, websocket))
     receive_task = asyncio.create_task(_ws_receive_loop(user, chat_ids, websocket))
@@ -122,7 +154,8 @@ async def ws_endpoint(websocket: WebSocket, user: WsUserDep, db: DbDep) -> None:
             from app.core.valkey import set_last_seen_if_offline
 
             await set_last_seen_if_offline(db, user.id)
-            await rt.publish_to_user(user.id, "presence", {"user_id": user.id, "online": False})
+            await db.refresh(user)
+            await _notify_chatmates(db, user, online=False)
         with contextlib.suppress(Exception):
             await pubsub.unsubscribe()
             await pubsub.aclose()

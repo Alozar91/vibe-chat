@@ -16,17 +16,34 @@ async def upsert_user_by_sub(
 ) -> User:
     """Находит пользователя по keycloak_sub; при отсутствии — создаёт.
 
+    Пользователь, созданный инвайт-регистрацией, приходит с keycloak_sub=NULL
+    (KC-аккаунт и системная запись создаются раздельно, §5): при первом логине
+    JIT-upsert должен **привязать** его по username к KC-`sub`, а не плодить
+    дубликат. Коллизия username (занят другим sub) — суффикс (§6).
     Keycloak — только идентификация/аутентификация (§5): персональные данные
     (имя, фамилия, почта, display_name) из JWT не берутся и не обновляются —
     они живут в системе и редактируются через PATCH /users/me. Из токена
     используется только `preferred_username` как начальный username —
     технический логин, не персональные данные.
-
-    Коллизия username (уже занят другим sub) — суффикс (§6).
     """
     existing = await db.scalar(select(User).where(User.keycloak_sub == sub))
     if existing is not None:
         return existing
+
+    # Привязка инвайт-записи: тот же username и ещё не привязан к KC (§5.4).
+    # preferred_username в JWT — истина от KC (KC сам переименовывает при коллизии).
+    unclaimed = (
+        await db.scalars(
+            select(User)
+            .where(User.username == preferred_username, User.keycloak_sub.is_(None))
+            .order_by(User.created_at)
+        )
+    ).all()
+    if unclaimed:
+        claim = unclaimed[0]
+        claim.keycloak_sub = sub
+        await db.commit()
+        return claim
 
     base_username = preferred_username
     username = base_username

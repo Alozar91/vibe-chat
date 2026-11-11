@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from app.core import valkey
 from app.models.bot import BotProfile
-from app.models.chat import ChatMember
+from app.models.chat import Chat, ChatMember
 from app.models.message import Message
 from app.models.user import User
 from fastapi import HTTPException, status
@@ -60,40 +60,95 @@ async def publish_to_user(user_id: str, event_type: str, data: dict[str, Any]) -
 
 
 async def publish_message_new(db: AsyncSession, message: Message) -> None:
-    """message.new участникам чата (Pub/Sub) + ботам чата (Streams, §10)."""
-    data: dict[str, Any] = {
-        "id": message.id,
-        "chat_id": message.chat_id,
-        "sender_id": message.sender_id,
-        "type": message.type,
-        "text": message.text,
-        "client_ref": message.client_ref,
-        "reply_to_id": message.reply_to_id,
-        "created_at": message.created_at.isoformat() if message.created_at else None,
-    }
-    await publish_to_chat(message.chat_id, "message.new", data)
+    """message.new участникам (Pub/Sub) + ботам чата (Streams, §10).
+
+    Payload — полная сериализация тем же serializer'ом, что REST (§9, этап 10.2):
+    клиент мержит событие в кэш по id без догоняющего REST-запроса. Ботам тот же
+    payload кладётся в Stream плоским словарём (без обёртки {message: ...}).
+    """
+    data = await serialize_message_payload(db, message)
+    await publish_message_to_members(db, message.chat_id, "message.new", data)
     await fanout_to_bots(db, message.chat_id, "message.new", data)
 
 
 async def publish_message_edited(db: AsyncSession, message: Message) -> None:
-    data: dict[str, Any] = {
-        "id": message.id,
-        "chat_id": message.chat_id,
-        "text": message.text,
-        "edited_at": _iso(message.edited_at),
-    }
-    await publish_to_chat(message.chat_id, "message.edited", data)
+    data = await serialize_message_payload(db, message)
+    await publish_message_to_members(db, message.chat_id, "message.edited", data)
     await fanout_to_bots(db, message.chat_id, "message.edited", data)
 
 
 async def publish_message_deleted(db: AsyncSession, message: Message) -> None:
-    data: dict[str, Any] = {
-        "id": message.id,
-        "chat_id": message.chat_id,
-        "deleted_at": _iso(message.deleted_at),
-    }
-    await publish_to_chat(message.chat_id, "message.deleted", data)
+    data = await serialize_message_payload(db, message)
+    await publish_message_to_members(db, message.chat_id, "message.deleted", data)
     await fanout_to_bots(db, message.chat_id, "message.deleted", data)
+
+
+async def serialize_message_payload(db: AsyncSession, message: Message) -> dict[str, Any]:
+    """Полный MessageOut-словарь для WS (§9, этап 10.2): attachments с URL + реакции.
+
+    Вызывается после commit; db.refresh поднимает атрибуты, expired при commit.
+    """
+    from app.services.messages import load_attachments, serialize_message
+    from app.services.reactions import list_reactions
+
+    await db.refresh(message)
+    attachments = await load_attachments(db, [message.id])
+    reactions = await list_reactions(db, [message.id])
+    return serialize_message(message, attachments.get(message.id, []), reactions.get(message.id, []))
+
+
+async def publish_message_to_members(
+    db: AsyncSession, chat_id: str, event_type: str, data: dict[str, Any]
+) -> None:
+    """message.* → канал чата + персональные каналы участников (§9, этап 10.2).
+
+    Людям payload оборачивается: {message: <MessageOut>} (§9). Персональные
+    каналы обязательны: подписки WS на чаты фиксируются при коннекте, чат мог
+    появиться позже — без user:{id} доставка не доходит. Ботам кладётся плоский
+    словарь (fanout_to_bots получает data без обёртки, §10).
+    """
+    wrapped = {"message": data}
+    await publish_to_chat(chat_id, event_type, wrapped)
+    for user_id in await chat_member_ids(db, chat_id):
+        await publish_to_user(user_id, event_type, wrapped)
+
+
+async def publish_chat_created(db: AsyncSession, chat_id: str) -> None:
+    """chat.created участникам нового чата (§9): список чатов обновится без refresh."""
+    await publish_chat_event(db, chat_id, "chat.created", {})
+
+
+async def publish_chat_deleted(db: AsyncSession, chat_id: str) -> None:
+    """chat.updated с deleted:true участникам при soft delete чата (§9)."""
+    await publish_chat_event(db, chat_id, "chat.updated", {"deleted": True})
+
+
+async def publish_chat_event(db: AsyncSession, chat_id: str, event_type: str, extra: dict[str, Any]) -> None:
+    """chat.* → персональные каналы участников: {chat: ChatOut} (+ extra).
+
+    Только в user:{id} — получатель может ещё не иметь чата в подписках WS.
+    """
+    chat = await db.get(Chat, chat_id)
+    if chat is None:
+        return
+    payload = {"chat": chat_out_dict(chat), **extra}
+    for user_id in await chat_member_ids(db, chat_id):
+        await publish_to_user(user_id, event_type, payload)
+
+
+def chat_out_dict(chat: Chat) -> dict[str, Any]:
+    """Словарь ChatOut для WS-событий (поля — как REST ChatOut, этап 10.2)."""
+    return {
+        "id": chat.id,
+        "type": chat.type,
+        "title": chat.title,
+        "last_message_at": None,
+        "unread_count": 0,
+        "avatar_file_id": chat.avatar_file_id,
+        "created_by": chat.created_by,
+        "created_at": chat.created_at.isoformat() if chat.created_at else None,
+        "deleted_at": chat.deleted_at.isoformat() if chat.deleted_at else None,
+    }
 
 
 async def fanout_to_bots(
@@ -119,10 +174,6 @@ async def fanout_to_bots(
     )
     for bot_id in bot_ids:
         await push_bot_event(bot_id, event_type, data)
-
-
-def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt is not None else None
 
 
 async def chat_member_ids(db: AsyncSession, chat_id: str) -> list[str]:

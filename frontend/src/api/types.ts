@@ -107,7 +107,7 @@ export type WsEvent =
     }
   | {
       type: 'read'
-      data: { chat_id: string; user_id: string; message_id: string }
+      data: { chat_id: string; user_id: string; last_read_message_id: string }
       event_id: string
       ts: number
     }

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from app.schemas.user import UserOut
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
@@ -11,6 +12,7 @@ class ChatMemberOut(BaseModel):
     user_id: str
     role: str
     last_read_message_id: str | None
+    user: UserOut  # объект пользователя — фронту для имён direct-чатов (этап 10.2)
 
 
 class ChatOut(BaseModel):
@@ -19,6 +21,9 @@ class ChatOut(BaseModel):
     id: str
     type: str
     title: str | None
+    # вычисляются при выдаче списка (§12: last_message_at из MAX(id), не хранится)
+    last_message_at: datetime | None = None
+    unread_count: int = 0
     avatar_file_id: str | None
     created_by: str
     created_at: datetime

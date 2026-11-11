@@ -29,10 +29,10 @@ export function NewChatDialog({ open, onClose }: Props) {
 
   const createDirect = useMutation({
     mutationFn: (userId: string) => chatsApi.createDirect(userId),
-    onSuccess: (chat) => {
+    onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['chats'] })
       onClose()
-      navigate(`/chat/${chat.id}`)
+      navigate(`/chat/${res.chat_id}`)
     },
   })
 

@@ -3,26 +3,27 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useWsStore } from '@/realtime/ws'
-import type { Message, ReactionGroup } from '@/api/types'
+import type { Chat, Message, ReactionGroup } from '@/api/types'
 
-function upsertMessage(list: Message[] | undefined, msg: Message): Message[] {
-  const list0 = list ?? []
-  const idx = list0.findIndex((m) => m.id === msg.id)
-  if (idx >= 0) {
-    const next = list0.slice()
-    next[idx] = msg
-    return next
-  }
-  return [...list0, msg]
-}
-
-interface MessagePayload {
-  message: Message
-}
 interface ReactionPayload {
   message_id: string
   chat_id: string
   reactions: ReactionGroup[]
+}
+
+/** Мерж сообщения в ленту: только в уже загруженную (REST догонит при открытии чата). */
+function upsertMessage(queryClient: QueryClient, chatId: string, msg: Message): void {
+  const key = ['messages', chatId, 'list'] as const
+  const existing = queryClient.getQueryData<Message[]>(key)
+  if (existing === undefined) return
+  const idx = existing.findIndex((m) => m.id === msg.id)
+  if (idx >= 0) {
+    const next = existing.slice()
+    next[idx] = msg
+    queryClient.setQueryData(key, next)
+  } else {
+    queryClient.setQueryData(key, [...existing, msg])
+  }
 }
 
 export function WsEventsBridge({ queryClient }: { queryClient: QueryClient }) {
@@ -34,10 +35,10 @@ export function WsEventsBridge({ queryClient }: { queryClient: QueryClient }) {
         case 'message.new':
         case 'message.edited':
         case 'message.deleted': {
-          const msg = (e.data as MessagePayload).message
-          queryClient.setQueryData<Message[]>(['messages', msg.chat_id, 'list'], (old) =>
-            upsertMessage(old, msg),
-          )
+          // бэкенд шлёт полную сериализацию MessageOut (§9, этап 10.2)
+          const msg = (e.data as { message?: Message }).message
+          if (!msg || !msg.id || !msg.created_at || !msg.updated_at) return
+          upsertMessage(queryClient, msg.chat_id, msg)
           if (e.type === 'message.new') {
             void queryClient.invalidateQueries({ queryKey: ['chats'] })
           }
@@ -55,12 +56,40 @@ export function WsEventsBridge({ queryClient }: { queryClient: QueryClient }) {
           })
           break
         }
-        case 'chat.created':
-        case 'chat.updated':
-        case 'member.joined':
-        case 'member.left':
+        case 'chat.created': {
+          // новый чат (в т.ч. созданный собеседником): список догонит REST
           void queryClient.invalidateQueries({ queryKey: ['chats'] })
           break
+        }
+        case 'chat.updated': {
+          const { chat, deleted } = e.data as { chat: Chat; deleted?: boolean }
+          queryClient.setQueryData<Chat>(['chat', chat.id], (old) =>
+            old ? { ...old, ...chat, unread_count: old.unread_count } : old,
+          )
+          void queryClient.invalidateQueries({ queryKey: ['chats'] })
+          if (deleted) void queryClient.removeQueries({ queryKey: ['chat', chat.id] })
+          break
+        }
+        case 'read': {
+          const { chat_id, user_id, last_read_message_id } = e.data as {
+            chat_id: string
+            user_id: string
+            last_read_message_id: string
+          }
+          queryClient.setQueryData(['chat', chat_id], (old: unknown) => {
+            const details = old as
+              | { members: { user_id: string; last_read_message_id: string | null }[] }
+              | undefined
+            if (!details) return old
+            return {
+              ...details,
+              members: details.members.map((m) =>
+                m.user_id === user_id ? { ...m, last_read_message_id: last_read_message_id } : m,
+              ),
+            }
+          })
+          break
+        }
         default:
           break
       }
