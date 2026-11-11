@@ -1,13 +1,16 @@
-/** Регистрация по инвайт-коду (§5): credentials → Keycloak, персональные данные → система. */
+/** Регистрация по инвайт-ссылке/коду (§5): credentials → Keycloak, персональные данные → система. */
 
 import { useMutation } from '@tanstack/react-query'
 import { MessageSquare } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { registerWithInvite } from '@/api/client'
 
 export function RegisterPage() {
-  const [inviteCode, setInviteCode] = useState('')
+  // код из инвайт-ссылки /register?code=… (§5): поле скрыто, код предзаполнен
+  const [params] = useSearchParams()
+  const urlCode = params.get('code') ?? ''
+  const [inviteCode, setInviteCode] = useState(urlCode)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [firstName, setFirstName] = useState('')
@@ -65,13 +68,19 @@ export function RegisterPage() {
           }}
           className="flex flex-col gap-3"
         >
-          <input
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
-            placeholder="Инвайт-код (vh_…)"
-            required
-            className={inputCls}
-          />
+          {urlCode ? (
+            <div className="rounded-lg bg-panel-2 px-3 py-2 text-xs text-muted">
+              Регистрация по инвайт-ссылке
+            </div>
+          ) : (
+            <input
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="Инвайт-код (vh_…)"
+              required
+              className={inputCls}
+            />
+          )}
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}

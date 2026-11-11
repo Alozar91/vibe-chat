@@ -1,14 +1,20 @@
-/** Админ-секция инвайтов (§5): создание multi-use кодов, список, деактивация. */
+/** Админ-секция инвайтов (§5): создание multi-use инвайтов-ссылок, список, деактивация. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Check, Copy, Link2, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { invitesApi } from '@/api/client'
 import { fmtDateTime } from '@/lib/format'
 
+/** Ссылка регистрации с предзаполненным кодом (/register?code=…, §5). */
+function inviteLink(code: string): string {
+  return `${window.location.origin}/register?code=${encodeURIComponent(code)}`
+}
+
 export function InviteAdminSection() {
   const queryClient = useQueryClient()
   const [createdCode, setCreatedCode] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const [maxUses, setMaxUses] = useState('') // пусто = безлимит
 
   const invites = useQuery({ queryKey: ['invites'], queryFn: invitesApi.list })
@@ -17,6 +23,7 @@ export function InviteAdminSection() {
     mutationFn: () => invitesApi.create(maxUses ? Number(maxUses) : undefined),
     onSuccess: (inv) => {
       setCreatedCode(inv.code)
+      setCopied(false)
       void queryClient.invalidateQueries({ queryKey: ['invites'] })
     },
   })
@@ -26,9 +33,15 @@ export function InviteAdminSection() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['invites'] }),
   })
 
+  const copyLink = async (code: string) => {
+    await navigator.clipboard.writeText(inviteLink(code))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   return (
     <section className="mt-10 max-w-xl">
-      <h2 className="mb-3 text-sm font-semibold text-muted">Инвайт-коды (платформенный админ)</h2>
+      <h2 className="mb-3 text-sm font-semibold text-muted">Инвайты (платформенный админ)</h2>
 
       <div className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-panel p-4">
         <input
@@ -48,11 +61,24 @@ export function InviteAdminSection() {
 
       {createdCode && (
         <div className="mb-4 rounded-xl border border-accent/40 bg-accent/10 p-4">
-          <div className="mb-1 text-xs text-muted">Код создан — покажите его один раз, больше он не отобразится:</div>
-          <code className="select-all text-sm font-semibold text-accent">{createdCode}</code>
-          <button onClick={() => setCreatedCode(null)} className="ml-3 text-xs text-muted underline">
-            скрыть
-          </button>
+          <div className="mb-2 flex items-center gap-1.5 text-xs text-muted">
+            <Link2 className="size-3.5" />
+            Инвайт-ссылка создана — отправьте её тем, кто должен зарегистрироваться. Больше она не
+            отобразится:
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-panel-2 px-2.5 py-1.5 text-xs select-all text-accent">
+              {inviteLink(createdCode)}
+            </code>
+            <button
+              onClick={() => void copyLink(createdCode)}
+              title="Скопировать ссылку"
+              className="flex shrink-0 items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? 'Скопировано' : 'Копировать'}
+            </button>
+          </div>
         </div>
       )}
 
