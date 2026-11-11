@@ -19,6 +19,7 @@ from app.schemas.message import (
 )
 from app.services import files as file_service
 from app.services import messages as message_service
+from app.services import realtime as rt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +86,9 @@ async def send_message(
         client_ref=_client_ref(idempotency_key, None),
     )
     attachments = await message_service.load_attachments(db, [message.id])
+    # message.new → участникам через Valkey Pub/Sub (§9); повтор идемпотентного
+    # запроса события не дублирует смысл (клиенты дедуплицируют по id, §9)
+    await rt.publish_message_new(db, message)
     return MessageOut.model_validate(
         message_service.serialize_message(message, attachments.get(message.id, [])),
         from_attributes=True,
@@ -95,6 +99,7 @@ async def send_message(
 async def edit_message(message_id: str, body: MessageEditIn, me: UserDep, db: DbDep) -> MessageOut:
     message = await message_service.edit_message(db, message_id=message_id, actor=me, new_text=body.text)
     attachments = await message_service.load_attachments(db, [message.id])
+    await rt.publish_message_edited(message)
     return MessageOut.model_validate(
         message_service.serialize_message(message, attachments.get(message.id, [])),
         from_attributes=True,
@@ -104,6 +109,7 @@ async def edit_message(message_id: str, body: MessageEditIn, me: UserDep, db: Db
 @router.delete("/messages/{message_id}", response_model=MessageOut)
 async def delete_message(message_id: str, me: UserDep, db: DbDep) -> MessageOut:
     message = await message_service.delete_message(db, message_id=message_id, actor=me)
+    await rt.publish_message_deleted(message)
     return MessageOut.model_validate(
         message_service.serialize_message(message, []),  # deleted: заглушка без вложений
         from_attributes=True,

@@ -49,3 +49,9 @@ class DirectCreateIn(BaseModel):
 class DirectCreatedOut(BaseModel):
     chat_id: str
     created: bool  # true — новый чат, false — вернули существующий
+
+
+class ReadIn(BaseModel):
+    """POST /chats/{id}/read — {message_id} этого чата (§12)."""
+
+    message_id: str
