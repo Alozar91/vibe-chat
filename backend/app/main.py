@@ -1,14 +1,28 @@
 """Точка входа FastAPI."""
 
+import contextlib
+from collections.abc import AsyncIterator
+
 from app.core.config import get_settings
 from fastapi import FastAPI
 
 settings = get_settings()
 
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from app.services.periodic import start_background_tasks, stop_background_tasks
+
+    tasks = start_background_tasks(app)
+    yield
+    stop_background_tasks(tasks)
+
+
 app = FastAPI(
     title="Vibe Chat API",
     version="0.1.0",
     docs_url="/docs",
+    lifespan=lifespan,
 )
 
 from app.api.v1 import chats, health, messages, realtime, users  # noqa: E402
