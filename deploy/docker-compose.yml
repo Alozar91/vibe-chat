@@ -1,0 +1,98 @@
+# Vibe Chat — инфраструктура. Приложения в dev поднимаются локально (Docs/concept.md §13).
+# Полный запуск в контейнерах: docker compose --profile full up --build
+name: vibe-chat
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vibe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vibe}
+      POSTGRES_DB: ${POSTGRES_DB:-vibe}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vibe}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkeydata:/data
+
+  silo:
+    image: pgsty/silo:RELEASE.2026-11-09T00-00-00Z
+    environment:
+      MINIO_ROOT_USER: ${SILO_ROOT_USER:-vibe}
+      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD:-vibe-secret}
+      # CORS: браузерный PUT — cross-origin (§8); в dev разрешаем localhost-origins
+      MINIO_API_CORS_ALLOW_ORIGIN: ${SILO_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - silodata:/data
+
+  keycloak:
+    image: keycloak/keycloak:26.8
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+
+  # ── Профиль full: приложения в контейнерах ─────────────────────────────
+  backend:
+    image: backend:dev
+    profiles: ["full"]
+    build:
+      context: ../backend
+      dockerfile: ../deploy/backend.Dockerfile
+    environment: &backend_env
+      APP_DB_URL: postgresql+asyncpg://vibe:vibe@postgres:5432/vibe
+      APP_VALKEY_URL: valkey://valkey:6379/0
+      APP_SILO_INTERNAL_URL: http://silo:9000
+      APP_SILO_PUBLIC_URL: http://localhost:9000
+      APP_SILO_ACCESS_KEY: ${SILO_ROOT_USER:-vibe}
+      APP_SILO_SECRET_KEY: ${SILO_ROOT_PASSWORD:-vibe-secret}
+      APP_KEYCLOAK_URL: http://keycloak:8080
+      APP_KEYCLOAK_REALM: vibe-chat
+      APP_KEYCLOAK_AUDIENCE: backend-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_started
+      silo:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: frontend:dev
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:
+  valkeydata:
+  silodata:
