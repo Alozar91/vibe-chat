@@ -4,7 +4,7 @@
 
 ## Статус
 
-Бэкенд MVP реализован (этапы 1–8 дорожной карты, 2026-11-11; 87 тестов): auth, чаты, сообщения+файлы, realtime, cleanup, боты, каркас mini-apps. Следующий этап — реакции (п.9) и фронтенд (п.10). Реализационные решения (детали API, схема БД, структура пакетов) фиксируются в `Docs/concept.md` и здесь не дублируются.
+Бэкенд MVP реализован (этапы 1–9 дорожной карты, 2026-11-11; 106 тестов): auth, чаты, сообщения+файлы, realtime, cleanup, боты, каркас mini-apps, реакции; персональные данные — в системе (Keycloak только для аутентификации, этап 9.1). Следующий этап — фронтенд (п.10). Реализационные решения (детали API, схема БД, структура пакетов) фиксируются в `Docs/concept.md` и здесь не дублируются.
 
 ## Стек (зафиксирован)
 
@@ -14,13 +14,14 @@
 - **DB:** PostgreSQL (основное хранилище всего)
 - **Кэш/Pub/Sub:** Valkey — не Redis. Никогда не добавлять redis-пакеты/образы
 - **Объектное хранилище:** Silo (S3-совместимый, форк MinIO от Pigsty) — не MinIO. В коде и конфигах именование Silo / `SILO_*`; только сам Silo-контейнер может использовать свои исторические `MINIO_*` env-переменные
-- **Auth:** Keycloak (OIDC; MVP — логин-пароль, потом LDAP/Kerberos через федерацию). Realm-роли в MVP не используются; авторизация по членству в чатах; в realm-export обязателен audience mapper
+- **Auth:** Keycloak (OIDC; MVP — логин-пароль, потом LDAP/Kerberos через федерацию). Realm-роли в MVP не используются; авторизация по членству в чатах; в realm-export обязателен audience mapper. Keycloak — **только идентификация/аутентификация** (`sub`); персональные данные (имя, фамилия, почта) — в PostgreSQL системы, из JWT-клеймов не берутся (§5 концепции)
 - **Realtime:** WebSocket + Valkey Pub/Sub
 - **Деплой:** Docker Compose, монорепо `backend/` + `frontend/` + `Docs/` + `deploy/`
 
 ## Ключевые архитектурные решения
 
 - Бэкенд не выдаёт токены — только валидирует JWT Keycloak'а (JWKS, iss/aud/exp). Единственное исключение — скоупед opaque-токены `mat_…` для mini-apps (Docs/concept.md §11).
+- Keycloak — только identification/authentication: из JWT берутся `sub` и `preferred_username` (начальный логин). Персональные данные (`first_name`, `last_name`, `email`, `display_name`, аватар, пояс) живут в PostgreSQL и редактируются через `PATCH /users/me`; из клеймов (`name`, `email` и т.п.) не берутся, с Keycloak не синхронизируются (Docs/concept.md §5).
 - `messages.type` только `text|system`; тип медиа живёт исключительно в `attachments.kind` (сверяется с `real_mime_type`, несовпадение — 422). Не добавлять `image/video/file` в `messages.type`. Видео в MVP: метаданные извлекает клиент (ffmpeg на бэкенде нет).
 - Файлы не проксируются через бэкенд: presigned PUT/GET напрямую в Silo; URL встраиваются в сериализацию сообщений. У Silo два адреса в конфиге: `SILO_INTERNAL_URL` (серверные операции) и `SILO_PUBLIC_URL` (host в presigned URL — он входит в подпись). Бэкенд генерирует thumbnails (Pillow), определяет реальный mime (не доверять клиенту); `thumb_key`/`blurhash` — в `files` (не в `attachments` — они генерируются до создания attachment'а); SVG — не image. Браузерный PUT в Silo — cross-origin: на Silo обязателен CORS, иначе загрузки падают на preflight.
 - Боты: управляет только **платформенный админ** (`users.is_platform_admin`, MVP — seed-пользователь); в чаты ботов добавляют чат-админы; в Bot API есть чтение истории (`/bot/chats/{id}/messages`) — без него resync бота невозможен.
