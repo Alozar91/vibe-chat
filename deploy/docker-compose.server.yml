@@ -1,0 +1,141 @@
+# Vibe Chat - server deploy (own nginx on own ports, neighbor nginx untouched).
+# 8443 = SPA + REST/WS + Silo + LiveKit signaling (same origin)
+# 8444 = Keycloak (iss = https://DOMAIN:8444)
+# Run:  docker compose -f deploy/docker-compose.server.yml --env-file deploy/server.env up -d --build
+# See deploy/server.env.example for required variables.
+name: vibe-chat-server
+
+services:
+  edge:
+    image: nginx:1.27-alpine
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      livekit:
+        condition: service_started
+      silo:
+        condition: service_started
+    ports:
+      - "8443:8443"
+      - "8444:8444"
+    volumes:
+      # templates → envsubst → /etc/nginx/conf.d (родной механизм образа nginx)
+      - ./nginx-edge:/etc/nginx/templates:ro
+      # монтируем /etc/letsencrypt целиком: симлинки live/ → archive/
+      - ${LE_CERT_DIR}:/etc/letsencrypt:ro
+    environment:
+      # подстановка в шаблон: /etc/letsencrypt/live/<домен>
+      LE_CERT_PATH: /etc/letsencrypt/live/${VIBE_DOMAIN}
+      VIBE_DOMAIN: ${VIBE_DOMAIN}
+
+  frontend:
+    image: nginx:1.27-alpine
+    volumes:
+      - ../frontend/dist:/usr/share/nginx/html:ro
+    expose:
+      - "80"
+
+  backend:
+    image: backend:server
+    build:
+      context: ../backend
+      dockerfile: ../deploy/backend.Dockerfile
+    environment:
+      APP_DB_URL: postgresql+asyncpg://vibe:${POSTGRES_PASSWORD:-vibe-server}@postgres:5432/vibe
+      APP_VALKEY_URL: valkey://valkey:6379/0
+      APP_SILO_INTERNAL_URL: http://silo:9000
+      APP_SILO_PUBLIC_URL: https://${VIBE_DOMAIN}:8443
+      APP_SILO_ACCESS_KEY: ${SILO_ROOT_USER:-vibe}
+      APP_SILO_SECRET_KEY: ${SILO_ROOT_PASSWORD:-vibe-secret}
+      APP_SILO_BUCKET: vibe-files
+      APP_KEYCLOAK_URL: https://${VIBE_DOMAIN}:8444
+      APP_KEYCLOAK_REALM: vibe-chat
+      APP_KEYCLOAK_AUDIENCE: backend-api
+      APP_KEYCLOAK_ADMIN_CLIENT_ID: backend-admin
+      APP_KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
+      APP_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      APP_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+      APP_LIVEKIT_WS_URL: wss://${VIBE_DOMAIN}:8443/livekit
+      APP_CALL_RING_TIMEOUT_SECONDS: 45
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_started
+      silo:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    expose:
+      - "8000"
+
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: vibe
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vibe-server}
+      POSTGRES_DB: vibe
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8
+    volumes:
+      - valkeydata:/data
+
+  silo:
+    image: pgsty/silo:RELEASE.2026-11-09T00-00-00Z
+    environment:
+      MINIO_ROOT_USER: ${SILO_ROOT_USER:-vibe}
+      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD:-vibe-secret}
+    command: server /data
+    expose:
+      - "9000"
+    volumes:
+      - silodata:/data
+
+  keycloak:
+    image: keycloak/keycloak:26.8
+    command: start-dev --import-realm -Dkeycloak.migration.replace-placeholders=true
+    environment:
+      KC_HOSTNAME: https://${VIBE_DOMAIN}:8444
+      KC_HOSTNAME_STRICT: "false"
+      # TLS терминируется на edge — KC должен доверять X-Forwarded-* (§13)
+      KC_PROXY_HEADERS: xforwarded
+      # подстановка в realm-export: redirect/webOrigins клиента frontend
+      VIBE_PUBLIC_URL: https://${VIBE_DOMAIN}:8443
+      KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml --node-ip ${VIBE_DOMAIN}
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret}"
+    ports:
+      - "7881:7881"
+      - "50000-60000:50000-60000/udp"
+    volumes:
+      - ./livekit/livekit-server.yaml:/etc/livekit.yaml:ro
+
+volumes:
+  pgdata:
+  valkeydata:
+  silodata:
