@@ -44,6 +44,24 @@ export function MessageBubble({
   })
 
   if (m.type === 'system') {
+    // плашка звонка (§17): «📞 Звонок · 5:23» / «📞 Пропущенный звонок»
+    const kind = m.payload?.['kind']
+    if (kind === 'call_ended' || kind === 'call_missed') {
+      const p = m.payload as { duration_s?: number; kind_of_call?: string }
+      const minutes = Math.floor((p.duration_s ?? 0) / 60)
+      const seconds = (p.duration_s ?? 0) % 60
+      const duration = `${minutes}:${String(seconds).padStart(2, '0')}`
+      return (
+        <div className="my-2 flex justify-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 px-3 py-1 text-xs text-muted">
+            <span>{kind === 'call_missed' ? '📵' : '📞'}</span>
+            <span>{kind === 'call_missed' ? 'Пропущенный звонок' : 'Звонок'}</span>
+            {kind === 'call_ended' && p.duration_s !== undefined && <span>· {duration}</span>}
+            {p.kind_of_call === 'video' && <span>· видео</span>}
+          </span>
+        </div>
+      )
+    }
     return <div className="my-2 text-center text-xs text-muted">{m.text}</div>
   }
 

@@ -1,6 +1,6 @@
 /** Тонкий fetch-клиент /api/v1: Bearer из OIDC, 401 → silent renew → retry (§5). */
 
-import type { Chat, ChatDetails, ChatMember, FileOut, Invite, InviteCreated, Message, User } from './types'
+import type { Chat, ChatDetails, ChatMember, Call, CallTokenOut, FileOut, Invite, InviteCreated, Message, User } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -202,4 +202,17 @@ export const invitesApi = {
   create: (maxUses?: number, expiresAt?: string) =>
     api.post<InviteCreated>('/invites', { max_uses: maxUses, expires_at: expiresAt }),
   deactivate: (id: string) => api.post<Invite>(`/invites/${id}/deactivate`),
+}
+
+// --- Calls (§17) ---
+
+export const callsApi = {
+  start: (chatId: string, kind: 'audio' | 'video' = 'audio') =>
+    api.post<Call>('/calls', { chat_id: chatId, kind }),
+  accept: (callId: string) => api.post<Call>(`/calls/${callId}/accept`),
+  reject: (callId: string) => api.post<Call>(`/calls/${callId}/reject`),
+  cancel: (callId: string) => api.post<Call>(`/calls/${callId}/cancel`),
+  join: (callId: string) => api.post<Call>(`/calls/${callId}/join`),
+  leave: (callId: string) => api.post<Call>(`/calls/${callId}/leave`),
+  token: (callId: string) => api.post<CallTokenOut>(`/calls/${callId}/token`),
 }

@@ -2,6 +2,7 @@
 
 import type { QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { useCallsStore } from '@/realtime/calls'
 import { useWsStore } from '@/realtime/ws'
 import type { Chat, Message, ReactionGroup } from '@/api/types'
 
@@ -96,6 +97,17 @@ export function WsEventsBridge({ queryClient }: { queryClient: QueryClient }) {
               ),
             }
           })
+          break
+        }
+        case 'call.ring':
+        case 'call.accepted':
+        case 'call.rejected':
+        case 'call.cancelled':
+        case 'call.joined':
+        case 'call.left':
+        case 'call.ended': {
+          // звонки (§17): состояние — в calls-сторе; лента догоняет system-сообщения через message.new
+          useCallsStore.getState().handleWsEvent(e)
           break
         }
         default:

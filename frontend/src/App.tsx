@@ -11,6 +11,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ChatsLayout } from '@/components/ChatsLayout'
+import { CallOverlay } from '@/components/CallOverlay'
 import { connectWs, disconnectWs } from '@/realtime/ws'
 import { WsEventsBridge } from '@/components/WsEventsBridge'
 
@@ -45,6 +46,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       <WsEventsBridge queryClient={queryClient} />
+      <CallOverlay />
       {children}
     </>
   )

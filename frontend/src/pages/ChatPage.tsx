@@ -1,7 +1,7 @@
 /** Лента чата: сообщения, реакции, цитирование, typing, отправка (§7, §9). */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Paperclip, Send, Settings2, X } from 'lucide-react'
+import { Paperclip, Phone, Send, Settings2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { chatsApi, messagesApi, uploadFile, usersApi } from '@/api/client'
@@ -9,6 +9,7 @@ import type { Message } from '@/api/types'
 import { ForwardDialog } from '@/components/ForwardDialog'
 import { GroupInfoDialog } from '@/components/GroupInfoDialog'
 import { MessageBubble } from '@/components/MessageBubble'
+import { useCallsStore } from '@/realtime/calls'
 import { useWsStore } from '@/realtime/ws'
 import { sendTyping } from '@/realtime/ws'
 import { browserTimezone, chatTitle, initials, userLabel } from '@/lib/format'
@@ -105,6 +106,8 @@ export function ChatPage() {
 
   const typing = useWsStore((s) => s.typing)
   const online = useWsStore((s) => s.online)
+  const callStart = useCallsStore((s) => s.start)
+  const activeCall = useCallsStore((s) => s.current)
 
   const send = useMutation({
     mutationFn: async (payload: { text: string }) => {
@@ -260,6 +263,17 @@ export function ChatPage() {
             className="ml-auto rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground"
           >
             <Settings2 className="size-5" />
+          </button>
+        )}
+        {/* Кнопка звонка (§17, этап A — аудио): group до этапа B — без звонка */}
+        {chatDetails.data?.type === 'direct' && (
+          <button
+            title="Позвонить"
+            disabled={!!activeCall}
+            onClick={() => void callStart(chatId)}
+            className={`${canManageGroup ? '' : 'ml-auto'} rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground disabled:opacity-40`}
+          >
+            <Phone className="size-5" />
           </button>
         )}
       </header>

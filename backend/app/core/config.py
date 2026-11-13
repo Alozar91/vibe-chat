@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Сообщения
     edit_window_hours: int = 24  # окно редактирования (§6)
 
+    # Звонки (LiveKit, §17): пустой api_key/secret — звонки выключены (503 на /calls/token)
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_ws_url: str = "ws://localhost:7880"  # публичный адрес WS-сигналинга для клиентов
+    call_ring_timeout_seconds: int = 45  # ringing дольше — ended (cleanup, §17)
+
 
 @lru_cache
 def get_settings() -> Settings:

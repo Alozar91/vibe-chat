@@ -53,6 +53,20 @@ services:
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
 
+  # ── Звонки (§17): LiveKit SFU ──────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret}"
+    ports:
+      - "7880:7880"       # WS-сигналинг
+      - "7881:7881"       # TCP-fallback ICE
+      # dev: 51000–52000 (Hyper-V занимает часть 50000–60000); на VPS — 50000–60000/udp
+      - "51000-52000:51000-52000/udp"  # медиа
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+
   # ── Профиль full: приложения в контейнерах ─────────────────────────────
   backend:
     image: backend:dev
@@ -72,6 +86,9 @@ services:
       APP_KEYCLOAK_AUDIENCE: backend-api
       APP_KEYCLOAK_ADMIN_CLIENT_ID: backend-admin
       APP_KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
+      APP_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      APP_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+      APP_LIVEKIT_WS_URL: ws://localhost:7880
     depends_on:
       postgres:
         condition: service_healthy

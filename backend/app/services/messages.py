@@ -412,6 +412,8 @@ SYSTEM_TEXTS = {
     "member_left": "участник вышел",
     "owner_changed": "владение передано",
     "role_changed": "роль изменена",
+    "call_ended": "звонок",
+    "call_missed": "пропущенный звонок",
 }
 
 

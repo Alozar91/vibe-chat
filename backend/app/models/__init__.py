@@ -1,6 +1,7 @@
 """Модели SQLAlchemy (Docs/concept.md §6). Импортируются для Alembic metadata."""
 
 from app.models.bot import BotProfile
+from app.models.call import Call, CallParticipant
 from app.models.chat import Chat, ChatMember, DirectChatKey
 from app.models.file import File
 from app.models.invite import Invite
@@ -11,6 +12,8 @@ from app.models.user import User
 __all__ = [
     "Attachment",
     "BotProfile",
+    "Call",
+    "CallParticipant",
     "Chat",
     "ChatMember",
     "DirectChatKey",

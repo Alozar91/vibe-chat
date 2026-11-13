@@ -95,4 +95,30 @@ describe('MessageBubble', () => {
     renderBubble(makeMessage({ type: 'system', text: 'чат создан', sender_id: null }))
     expect(screen.getByText('чат создан')).toBeInTheDocument()
   })
+
+  it('system call_ended — плашка «Звонок» с длительностью (§17)', () => {
+    renderBubble(
+      makeMessage({
+        type: 'system',
+        text: 'звонок',
+        sender_id: null,
+        payload: { kind: 'call_ended', call_id: 'k1', kind_of_call: 'audio', duration_s: 323 },
+      }),
+    )
+    expect(screen.getByText('Звонок')).toBeInTheDocument()
+    expect(screen.getByText('· 5:23')).toBeInTheDocument()
+    expect(screen.queryByText('звонок')).not.toBeInTheDocument()
+  })
+
+  it('system call_missed — плашка «Пропущенный звонок»', () => {
+    renderBubble(
+      makeMessage({
+        type: 'system',
+        text: 'пропущенный звонок',
+        sender_id: null,
+        payload: { kind: 'call_missed', call_id: 'k2', kind_of_call: 'audio' },
+      }),
+    )
+    expect(screen.getByText('Пропущенный звонок')).toBeInTheDocument()
+  })
 })

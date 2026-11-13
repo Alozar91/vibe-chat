@@ -95,6 +95,25 @@ export interface FileOut {
   created_at: string
 }
 
+// --- Звонки (§17) ---
+
+export interface Call {
+  id: string
+  chat_id: string
+  initiator_id: string
+  kind: 'audio' | 'video'
+  status: 'ringing' | 'active' | 'ended'
+  created_at: string
+  started_at: string | null
+  ended_at: string | null
+  participant_ids: string[]
+}
+
+export interface CallTokenOut {
+  token: string
+  ws_url: string
+}
+
 /** WS-конверт (§9). */
 export type WsEvent =
   | { type: 'message.new'; data: { message: Message }; event_id: string; ts: number }
@@ -123,4 +142,12 @@ export type WsEvent =
       event_id: string
       ts: number
     }
+  // Звонки (§17): {call: Call} (+ user_id в joined/left)
+  | { type: 'call.ring'; data: { call: Call }; event_id: string; ts: number }
+  | { type: 'call.accepted'; data: { call: Call }; event_id: string; ts: number }
+  | { type: 'call.rejected'; data: { call: Call }; event_id: string; ts: number }
+  | { type: 'call.cancelled'; data: { call: Call }; event_id: string; ts: number }
+  | { type: 'call.joined'; data: { call: Call; user_id: string }; event_id: string; ts: number }
+  | { type: 'call.left'; data: { call: Call; user_id: string }; event_id: string; ts: number }
+  | { type: 'call.ended'; data: { call: Call }; event_id: string; ts: number }
   | { type: string; data: unknown; event_id: string; ts: number }
