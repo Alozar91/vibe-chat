@@ -16,6 +16,7 @@ MVP **полностью реализован** (этапы 1–10 дорожн�
 - **Объектное хранилище:** Silo (S3-совместимый, форк MinIO от Pigsty) — не MinIO. В коде и конфигах именование Silo / `SILO_*`; только сам Silo-контейнер может использовать свои исторические `MINIO_*` env-переменные
 - **Auth:** Keycloak (OIDC; MVP — логин-пароль, потом LDAP/Kerberos через федерацию). Realm-роли в MVP не используются; авторизация по членству в чатах; в realm-export обязателен audience mapper. Keycloak — **только идентификация/аутентификация** (`sub`); персональные данные (имя, фамилия, почта) — в PostgreSQL системы, из JWT-клеймов не берутся (§5 концепции)
 - **Realtime:** WebSocket + Valkey Pub/Sub
+- **Звонки (этапы A/B/C, §17 концепции; не в MVP):** LiveKit self-hosted (SFU) + coturn (TURN); сигналинг звонка — наш WS, медиа — напрямую в LiveKit по room-токену. Никакого P2P-mesh и Jitsi-iframe.
 - **Деплой:** Docker Compose, монорепо `backend/` + `frontend/` + `Docs/` + `deploy/`
 
 ### Регистрация (инвайт-коды)
@@ -23,7 +24,7 @@ MVP **полностью реализован** (этапы 1–10 дорожн�
 
 ## Ключевые архитектурные решения
 
-- Бэкенд не выдаёт токены — только валидирует JWT Keycloak'а (JWKS, iss/aud/exp). Единственное исключение — скоупед opaque-токены `mat_…` для mini-apps (Docs/concept.md §11).
+- Бэкенд не выдаёт токены — только валидирует JWT Keycloak'а (JWKS, iss/aud/exp). Исключения — скоупед токены для внешних подсистем: opaque `mat_…` для mini-apps (Docs/concept.md §11) и room-JWT LiveKit для звонков (TTL ~10 мин, конкретная комната; §17).
 - Keycloak — только identification/authentication: из JWT берутся `sub` и `preferred_username` (начальный логин). Персональные данные (`first_name`, `last_name`, `email`, `display_name`, аватар, пояс) живут в PostgreSQL и редактируются через `PATCH /users/me`; из клеймов (`name`, `email` и т.п.) не берутся, с Keycloak не синхронизируются (Docs/concept.md §5).
 - `messages.type` только `text|system`; тип медиа живёт исключительно в `attachments.kind` (сверяется с `real_mime_type`, несовпадение — 422). Не добавлять `image/video/file` в `messages.type`. Видео в MVP: метаданные извлекает клиент (ffmpeg на бэкенде нет).
 - Файлы не проксируются через бэкенд: presigned PUT/GET напрямую в Silo; URL встраиваются в сериализацию сообщений. У Silo два адреса в конфиге: `SILO_INTERNAL_URL` (серверные операции) и `SILO_PUBLIC_URL` (host в presigned URL — он входит в подпись). Бэкенд генерирует thumbnails (Pillow), определяет реальный mime (не доверять клиенту); `thumb_key`/`blurhash` — в `files` (не в `attachments` — они генерируются до создания attachment'а); SVG — не image. Браузерный PUT в Silo — cross-origin: на Silo обязателен CORS, иначе загрузки падают на preflight.

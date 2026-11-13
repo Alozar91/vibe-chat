@@ -26,6 +26,7 @@
 | Frontend: data layer | TanStack Query (кэш REST) + Zustand (WS-состояние: typing, presence, оптимистичные апдейты) |
 | CI | Пока нет; локальные проверки: ruff/mypy/pytest, oxlint/tsc/vitest. Решить при появлении второй площадки |
 | Реакции | Эмодзи-реакции на сообщения (👍❤️😄...) — в MVP (решено 2026-11-11); схема в §6, API в §12 |
+| Звонки | **LiveKit** (self-hosted SFU, Apache 2.0) + coturn (TURN) — этапы A/B/C (§17): сигналинг звонка — наш WS (§9), медиа-сигналинг — LiveKit |
 
 ## 3. Структура монорепо
 
@@ -150,6 +151,10 @@ Keycloak — **только identification/authentication**: он выдаёт �
 
 **reactions** — `message_id` PK/FK→messages, `user_id` PK/FK→users (составной PK: одна реакция на пользователя на сообщение), `emoji` (короткое имя из фиксированного набора — `thumbs_up`, `heart`, `laugh`, `fire`, `check`; рендерит фронт), `created_at`. Реакция — **не** сообщение: в ленту не пишется, `updated_at` сообщения не двигает (в дельту edit/delete не попадает; доставка — WS-событие `reaction.updated`). Удаление сообщения скрывает реакции вместе с надгробием, строки не удаляет.
 
+**calls** — `id` UUIDv7 PK (= имя комнаты LiveKit, §17), `chat_id` → chats, `initiator_id` → users, `kind` enum(`audio`,`video`) — видео с этапа C без миграций, `status` enum(`ringing`,`active`,`ended`), `created_at`, `started_at` NULLABLE (первый accept/join), `ended_at` NULLABLE. Индекс `(chat_id, created_at)` — история звонков чата.
+
+**call_participants** — PK (`call_id`, `user_id`), `joined_at` (первый вход; повторные входы/выходы группового звонка — в лог не пишем, только текущее состояние), `left_at` NULLABLE. Звонок завершается, когда `active` и не осталось участников с `left_at IS NULL`; «пропущенный» у неответивших — дериват статуса звонка и `call_participants` (не отдельная таблица).
+
 ### Доступ к файлам
 - `pending` — видит только uploader; доступ к содержимому появляется после прикрепления к сообщению (участники этого чата) либо при использовании как аватар (все активные пользователи).
 - Право чтения определяется членством в чате, к которому прикреплён файл, — не «загрузил, значит можешь читать».
@@ -249,7 +254,7 @@ Client→server по WS — **только `typing`** (и ничего боль�
 - Реконнект: клиент переподключается и **догоняет дельту через REST**: `GET /chats` (новые чаты, состав, `unread_count`) → для **каждого своего чата**: новые сообщения `GET /messages?after=…` и изменения (edit/delete) `GET /messages?updated_after=…` (по `messages.updated_at`); состояние прочтения других участников — из `GET /chats/{id}`. Фильтр «только изменённые чаты» требует per-chat курсора изменений (`last_message_at` не двигается при edit/delete) — в MVP вместо него запрашиваются все чаты (десятки на пользователя — дёшево). Без запроса `updated_after` правки, случившиеся офлайн, никогда не доехали бы до клиента. Очередь реплея на сервере в MVP не строим — REST-дельта проще и надёжнее. Дубликаты WS-событий (at-least-once) дедуплицируются фронтом по id сообщения.
 - Presence: счётчик живых соединений пользователя — в Valkey (INCR при подключении, DECR при закрытии; DECR → 0 → бэкенд пишет `users.last_seen_at` и рассылает `presence` (offline + last_seen)). Счётчик в процессе бэкенда запрещён принципом «состояний в процессах нет» (§14). Ключ `presence:{user_id}` с TTL ~60 сек (пингуется соединениями) — страховка на нечистое закрытие (падение инстанса): истечение TTL замечается отложенно (до ~60 сек) и даёт тот же offline-эффект.
 - Read receipts: клиент вызывает `POST /chats/{id}/read` (канонический путь) → бэкенд обновляет `chat_members.last_read_message_id` → событие `read` участникам.
-- Звонки (перспектива): протокол оставляем расширяемым — позже добавятся события `call.*` (SDP/ICE) поверх того же WS. Для звонков рассматриваем self-hosted LiveKit как SFU. В MVP никакого кода под это.
+- Звонки (этапы A/B/C, §17): сигналинг звонка — события `call.ring`, `call.accepted`, `call.rejected`, `call.cancelled`, `call.joined`, `call.left`, `call.ended` поверх этого же WS (форматы — §17); медиа-сигналинг (SDP/ICE) идёт мимо бэкенда — напрямую в LiveKit по room-токену.
 
 ## 10. Боты
 
@@ -316,6 +321,15 @@ POST   /files/upload-url
 POST   /files/{id}/complete
 GET    /files/{id}/url             # точечные случаи; в сообщениях URL встроены в сериализацию
 
+# Звонки (§17, этапы A/B/C)
+POST   /calls                      # {chat_id, kind: audio|video} → CallOut (require_member; direct — сразу ringing)
+POST   /calls/{id}/accept          # direct: ответил → status=active, call.accepted
+POST   /calls/{id}/reject          # direct: отказался → call.rejected; initiator может cancel
+POST   /calls/{id}/cancel          # direct: initiator отменяет до accept → call.cancelled
+POST   /calls/{id}/join            # group (и повторный вход direct при реконнекте): статус → active
+POST   /calls/{id}/leave           # выход участника; последний вышел → ended
+POST   /calls/{id}/token           # room-токен LiveKit для этого звонка (только участник чата; TTL ~10 мин)
+
 # WS
 POST   /ws/ticket
 WS     /ws?ticket=
@@ -340,7 +354,7 @@ POST   /miniapps/token             # обмен кода на mat_-токен
 
 ## 13. Деплой и конфигурация
 
-`docker-compose.yml` сервисы: `backend`, `frontend` (nginx + собранный SPA), `postgres`, `valkey`, `silo`, `keycloak`.
+`docker-compose.yml` сервисы: `backend`, `frontend` (nginx + собранный SPA), `postgres`, `valkey`, `silo`, `keycloak`; с этапа A звонков (§17) — `livekit` (один контейнер, без Redis при одной ноде) и `coturn` (TURN-fallback).
 
 Топология: nginx — единая точка входа: раздаёт SPA, проксирует `/api/v1/*` (REST и WS с upgrade-заголовками) на backend. CORS в prod не нужен (same origin); в dev — vite proxy на backend. Keycloak и Silo — на отдельных subdomain'ах (Silo — обязательно, см. §8).
 
@@ -348,6 +362,7 @@ POST   /miniapps/token             # обмен кода на mat_-токен
 - Бэкапы (дефолт до уточнения у заказчика, §16): ежедневный `pg_dump` по расписанию (ночь, retention 14 дней) + снапшоты тома Silo; скрипты в `deploy/backup/`.
 - Keycloak: realm `vibe-chat` описывается realm-export'ом в `deploy/keycloak/`, чтобы поднимался воспроизводимо. В client-конфиге обязателен **audience mapper** (backend-api в `aud`), иначе строгая валидация `aud` на бэкенде отвергнет все токены; redirect URIs зависят от окружения — параметризовать или держать вариант файла на окружение.
 - Dev-режим: `uvicorn --reload` и `vite` отдельно от compose-инфраструктуры (postgres/valkey/silo/keycloak в compose, приложения локально).
+- LiveKit (§17): порты `7880/tcp` (WebSocket-сигналинг), `7881/tcp` (TCP-fallback ICE), `50000–60000/udp` (медиа, должен быть открыт на хосте — это главное требование к VPS), `443/udp` (TURN TLS). `rtc.use_external_ip: true` — сервер с выделенным IP достижим клиентами за NAT напрямую (исходящий UDP от клиента); coturn (TLS :443) — fallback для сетей с зарубленным UDP. TURN-сертификат — на отдельное DNS-имя (turn.*), валидный TLS обязателен.
 
 ## 14. Масштабирование (заделы, не задачи MVP)
 
@@ -373,7 +388,12 @@ POST   /miniapps/token             # обмен кода на mat_-токен
 12. Вложения в UI (этап 11, 2026-11-11): композер чата — скрепка → выбор файла → upload-флоу §8 (sha256 считает клиент), карточка вложения в композере, отправка `attachments` вместе с текстом; визуально — фото инлайн, файлы/видео карточкой (§7).
 13. Управление группой и пересылка в UI (этап 12, 2026-11-13): переименование `PATCH /chats/{id}` (admin/owner) + system-сообщение; смена ролей `PATCH /chats/{id}/members/{user_id}` `{role}` (owner); system-сообщения и `member.joined/left`/`chat.updated` при всех изменениях состава; UI — диалог «Инфо о группе» (участники/роли/добавление/исключение/передача владения), «Переслать» в меню сообщения (мультивыбор чатов).
 
-**Post-MVP:** инлайн-видео, вебхуки ботов, mini-apps (UI + запуск), LDAP/Kerberos (федерация Keycloak), поиск по сообщениям (PG full-text), аудио/видео звонки (WebRTC + SFU), мобильные приложения, push-уведомления.
+**Звонки (проработано 2026-11-13, §17; вне MVP-нумерации):**
+A. Аудио 1:1 (direct): compose + LiveKit + coturn; таблицы `calls`/`call_participants`; REST `/calls/*` + room-токен; WS-события `call.*`; ringing-UI (overlay, звук), панель активного звонка; system-сообщения «Звонок / Пропущенный».
+B. Групповые аудио: join-модель (room без ринга каждому — как Telegram), список участников в звонке, групповой UI; схема БД из A не меняется.
+C. Видео: публикация камеры (simulcast — в SFU из коробки), плитки видео, шаринг экрана; тот же контур, другой UI.
+
+**Post-MVP:** инлайн-видео, вебхуки ботов, mini-apps (UI + запуск), LDAP/Kerberos (федерация Keycloak), поиск по сообщениям (PG full-text), мобильные приложения, push-уведомления.
 
 ## 16. Открытые вопросы (не блокируют концепцию)
 
@@ -385,6 +405,72 @@ POST   /miniapps/token             # обмен кода на mat_-токен
 - Уведомления — **отложены** (post-MVP, вместе с мобильными).
 - Требования к хранению и бэкапам — **дефолт до уточнения у заказчика**: ежедневный `pg_dump` (ночь, retention 14 дней) + зеркалирование/снапшот тома Silo; скрипты — в `deploy/`.
 - Лимиты §8/§9 — **дефолты в конфиге**: max 10 вложений на сообщение, max 100 МБ/файл, длина текста 40 000, антифлуд 20 сообщений/мин на пользователя, typing не чаще 1 раза в 2 сек, max 20 chat_ids в одном forward.
+- Звонки — **выбран LiveKit self-hosted** (2026-11-13, §17): SFU вместо P2P-mesh (NAT, групповые), один контейнер compose, room-токен — скоупед JWT (третье исключение из «бэкенд не выдаёт токены», §17).
 
 **Остались открытыми:**
 - Хостинг/заказчик для production-окружения (где живёт compose, домены Keycloak/Silo).
+- TURN-домен и TLS-сертификат для coturn (нужно DNS-имя turn.* и валидный сертификат — зависит от выбора хостинга, §17).
+
+## 17. Звонки (аудио/видео; этапы A/B/C — проработано 2026-11-13, реализация вне MVP)
+
+### Архитектура: SFU LiveKit, не P2P
+
+Медиа-сервер — **self-hosted LiveKit** (Go-SFU, Apache 2.0, один бинарь/контейнер). Выбор против альтернатив:
+
+- **Не P2P-mesh**: hole-punching через NAT срабатывает лишь в 60–80% случаев (STUN без TURN — не решение, а надежда); mesh не масштабируется на группы (6 участников = 5 исходящих потоков у каждого); вся логика ICE/реконнектов дублируется в клиентах. SFU снимает все три проблемы: клиент инициирует исходящее соединение к серверу с выделенным IP (работает за любым NAT, где разрешён исходящий UDP), групповой звонок — та же механика, что 1:1.
+- **Не Jitsi**: готовый продукт (встраивается только iframe'ом — чужой UX, XMPP-стек из 4+ контейнеров), нам нужен движок под свой UI.
+- **Не mediasoup**: библиотека-движок без сигналинга/SDK — сигналинг, room-менеджмент, клиенты пришлось бы писать самому (недели-месяцы). LiveKit даёт всё из коробки при том же контейнере.
+
+Разделение сигналинга (принцип «бэкенд медиа не проксирует», как с Silo):
+- **Сигналинг звонка** (кто кому звонит, ринг, accept/reject, состав) — наш: REST-мутации + WS-события `call.*` через существующий fanout (§9).
+- **Медиа-сигналинг** (SDP/ICE, треки) — клиент напрямую в LiveKit (WS :7880) по room-токену; бэкенд его не видит.
+
+Нагрузка при масштабе MVP (~1k пользователей, звонки — единицы одновременных): одна нода LiveKit без Redis (Redis нужен только для кластера из нескольких нод), аудио ~30 kbps на участника на каждого слушателя (звонок на 10 человек ≈ 3 Мбит/с egress).
+
+### Модель звонков
+
+- **Direct (1:1) — ringing-модель**: `POST /calls` → у обоих ринг → accept (активный звонок) / reject / cancel (инициатором до accept). Пропущенный — system-сообщение в чате.
+- **Групповые — join-модель** (как Telegram/Discord): `POST /calls` открывает комнату в группе (без ринга каждому), участники join/leave свободно; событиями `call.joined/left` виден живой состав. Рекомендуется закладывать сразу: SFU делает группу столь же дешёвой, как 1:1, схема БД одинакова.
+- **Боты в звонках не участвуют** (нет аудио-тракта; `is_bot` при инициации/join — 422).
+- Room name в LiveKit = `calls.id` (UUIDv7); жизнь комнаты управляется нашим lifecycle (ringing → active → ended), сироты в LiveKit не живут дольше TTL комнаты.
+
+### Схема БД (§6): `calls`, `call_participants`
+
+`calls`: `id` UUIDv7 PK (= room name), `chat_id`, `initiator_id`, `kind` enum(`audio`,`video`), `status` enum(`ringing`,`active`,`ended`), `created_at`, `started_at` (первый accept/join), `ended_at`. `call_participants`: PK (`call_id`,`user_id`), `joined_at`, `left_at` NULLABLE. Завершение: `active`-звонок без участников с `left_at IS NULL` → `ended`. «Пропущенный» у неответивших — дериват статуса и `call_participants` (отдельной таблицы нет).
+
+### REST (§12) и WS-события (§9)
+
+REST (все мутации — REST, WS — только уведомления; require_member на всё):
+- `POST /calls` `{chat_id, kind}` → CallOut (direct → `ringing`; group → `ringing` + событие в группу)
+- `POST /calls/{id}/accept|reject|cancel` — direct-флоу (accept → `active` + `started_at`; reject/cancel → `ended`)
+- `POST /calls/{id}/join|leave` — group-флоу (и повторный вход при реконнекте); последний leave → `ended`
+- `POST /calls/{id}/token` → `{token, ws_url}` — room-токен LiveKit (только участник чата И звонка; TTL ~10 мин, payload: room = call.id, identity = user.id, publish/subscribe)
+
+WS-события (формат — `{call: <CallOut>}` либо `{call_id, user_id}` для joined/left): `call.ring`, `call.accepted`, `call.rejected`, `call.cancelled`, `call.joined`, `call.left`, `call.ended`. Ботам не доставляются (§10 — только `message.*`).
+
+System-сообщения в ленте (§9, новые kinds в `SYSTEM_TEXTS`): `call_ended` («Звонок · 5:23» — payload: kind, duration_s, initiator_id), `call_missed` («Пропущенный звонок»). Пишутся при завершении звонка; цитировать/пересылать — запрещено (как всем system).
+
+Cleanup-джоба (в существующий `periodic.py`): `ringing` старше 45 сек → `ended` (+ `call_missed`); `active` без участников → `ended` (+ `call_ended`, если ни одного system ещё нет).
+
+### Room-токен — третье исключение из «бэкенд не выдаёт токены»
+
+Аналогично presigned URL Silo (§8) и `mat_…` mini-apps (§11): скоупед JWT для внешней медиа-подсистемы — не аутентификация пользователя, а авторизация в конкретный ресурс (конкретная комната-звонок, TTL ~10 мин, только publish/subscribe). Подпись HS256 API-key/secret LiveKit'а; секрет — `APP_LIVEKIT_API_SECRET` в env (§13). Python server SDK LiveKit не нужен — обычный JWT.
+
+### NAT/TURN
+
+- Сервер с выделенным IP: `rtc.use_external_ip: true`; клиент за обычным NAT соединяется исходящим UDP к 50000–60000/udp — без TURN.
+- Корпоративные сети с зарубленным UDP (20–40% реальных соединений): fallback через **coturn** — сначала UDP/TCP relay, конечный fallback — **TURN over TLS :443** (неотличим от HTTPS; требует DNS-имя turn.* и валидный сертификат). Связка «SFU с выделенным IP + TURN TLS» покрывает ~100% сетей.
+- Порты LiveKit и конфиг — §13.
+
+### UI (фронт)
+
+- Кнопка 📞 (аудио) / 🎥 (видео, этап C) в шапке чата → `POST /calls`.
+- Входящий: полноэкранный/плавающий оверлей ринга (звук, аватар, принять/отклонить) — по `call.ring`; живёт поверх роутинга (звонок не рвётся при навигации) — отдельный компонент у корня приложения, состояние — Zustand-стор (вне TanStack Query, как typing/presence).
+- Активный звонок: панель с таймером, аватарами/составом, mute (локальный track.enabled), hang-up; групповой (этап B) — сетка участников из LiveKit-треков.
+- Пропущенный/завершённый — system-сообщение в ленте чата.
+
+### Этапы
+
+- **A. Аудио 1:1**: compose (livekit + coturn), миграция `calls`/`call_participants`, сервис + REST + WS-события + system-сообщения + cleanup, ringing-UI direct, room-токен, TURN. Основной объём работ.
+- **B. Групповые аудио** (+~25–30%): join-модель для group-чатов, живой состав в звонке, групповой UI. Схема и REST из A переиспользуются.
+- **C. Видео**: публикация камеры + плитки (simulcast уже в SFU), шаринг экрана. Тот же контур, только UI.
