@@ -56,7 +56,10 @@ services:
   # ── Звонки (§17): LiveKit SFU ──────────────────────────────────────────
   livekit:
     image: livekit/livekit-server:latest
-    command: --config /etc/livekit.yaml
+    # LIVEKIT_NODE_IP — IP, анонсируемый клиентам для ICE (dev: адрес host-машины
+    # в её же сети, т.к. браузер на той же машине; на VPS — публичный IP).
+    # 127.0.0.1 работает только когда браузер на той же Windows-машине.
+    command: --config /etc/livekit.yaml --node-ip ${LIVEKIT_NODE_IP:-127.0.0.1}
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret}"
     ports:

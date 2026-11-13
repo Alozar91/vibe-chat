@@ -8,8 +8,11 @@ rtc:
   tcp_port: 7881
   port_range_start: 51000
   port_range_end: 52000
-  # сервер с выделенным IP достижим клиентами за NAT напрямую (исходящий UDP)
-  use_external_ip: true
+  # use_external_ip — только для VPS с публичным IP на интерфейсе. На dev-машине
+  # за NAT он даёт недостижимые кандидаты (hairpin NAT не работает) → ICE failed.
+  # Dev-адрес задаётся флагом --node-ip в compose (LIVEKIT_NODE_IP, default 127.0.0.1 —
+  # браузер на той же машине).
+  use_external_ip: false
 keys:
   # dev-ключи; для прода — свои (env compose: LIVEKIT_API_KEY/LIVEKIT_API_SECRET)
   devkey: devsecret
