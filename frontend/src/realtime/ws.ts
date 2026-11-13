@@ -69,7 +69,10 @@ export async function connectWs(): Promise<void> {
   const store = useWsStore.getState()
   store.setStatus('connecting')
   try {
-    const resp = await fetch('/api/v1/ws/ticket', {
+    // base-aware (§13): при деплое под подпуть (VITE_BASE_PATH=/chat/) ticket-запрос
+    // идёт на <origin>/<base>/api/v1/ws/ticket
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+    const resp = await fetch(`${base}/api/v1/ws/ticket`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getAccessToken()}` },
     })
@@ -77,7 +80,7 @@ export async function connectWs(): Promise<void> {
     const { ticket } = (await resp.json()) as { ticket: string }
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws?ticket=${ticket}`)
+    const ws = new WebSocket(`${proto}//${window.location.host}${base}/api/v1/ws?ticket=${ticket}`)
     socket = ws
 
     ws.onopen = () => {

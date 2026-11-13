@@ -6,9 +6,10 @@ import { useState } from 'react'
 import { invitesApi } from '@/api/client'
 import { fmtDateTime } from '@/lib/format'
 
-/** Ссылка регистрации с предзаполненным кодом (/register?code=…, §5). */
+/** Ссылка регистрации с предзаполненным кодом (/register?code=…, §5); base-aware (§13). */
 function inviteLink(code: string): string {
-  return `${window.location.origin}/register?code=${encodeURIComponent(code)}`
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  return `${window.location.origin}${base}/register?code=${encodeURIComponent(code)}`
 }
 
 export function InviteAdminSection() {

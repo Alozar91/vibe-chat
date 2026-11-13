@@ -23,7 +23,7 @@ export function configureAuthHooks(get: TokenGetter, renewFn: Renewer): void {
   renew = renewFn
 }
 
-const BASE = '/api/v1'
+const BASE = new URL(import.meta.env.BASE_URL, window.location.origin).pathname.replace(/\/$/, '') + '/api/v1'
 
 async function request<T>(
   method: string,
@@ -39,7 +39,7 @@ async function request<T>(
   for (const [k, v] of Object.entries(options.query ?? {})) {
     if (v !== undefined) url.searchParams.set(k, String(v))
   }
-
+  // путь относительно корня origin (BASE может быть '/chat/api/v1' при деплое под подпуть §13)
   const headers: Record<string, string> = { ...(options.headers ?? {}) }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`

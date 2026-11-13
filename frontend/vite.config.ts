@@ -4,8 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
+  // деплой под подпуть (§13, системный nginx → location /chat): VITE_BASE_PATH=/chat/
+  // при сборке; локально (dev и build) — корень '/'
+  base: mode === 'production' ? (process.env.VITE_BASE_PATH ?? '/') : '/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -20,4 +23,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

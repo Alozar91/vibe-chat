@@ -9,11 +9,14 @@ const KC_URL = import.meta.env.VITE_KC_URL ?? 'http://localhost:8080'
 const REALM = import.meta.env.VITE_KC_REALM ?? 'vibe-chat'
 const CLIENT_ID = import.meta.env.VITE_KC_CLIENT_ID ?? 'frontend'
 
+// base-aware (§13): при деплое под подпуть redirect возвращается на <origin>/<base>/login
+const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
+
 export const oidcConfig = {
   authority: `${KC_URL}/realms/${REALM}`,
   client_id: CLIENT_ID,
-  redirect_uri: window.location.origin + '/login',
-  post_logout_redirect_uri: window.location.origin,
+  redirect_uri: window.location.origin + APP_BASE + '/login',
+  post_logout_redirect_uri: window.location.origin + APP_BASE,
   response_type: 'code',
   scope: 'openid profile email',
   automaticSilentRenew: true,
