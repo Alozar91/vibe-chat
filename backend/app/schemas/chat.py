@@ -47,6 +47,19 @@ class ChatCreateIn(BaseModel):
         return v
 
 
+class MembersAddIn(BaseModel):
+    """POST /chats/{id}/members — {member_ids[]} (admin/owner; уже состоящие пропускаются — §12)."""
+
+    member_ids: list[str]
+
+    @field_validator("member_ids")
+    @classmethod
+    def at_least_one(cls, v: list[str]) -> list[str]:
+        if len(v) < 1:
+            raise ValueError("member_ids must contain at least 1 user")
+        return v
+
+
 class DirectCreateIn(BaseModel):
     user_id: str
 

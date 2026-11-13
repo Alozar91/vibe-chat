@@ -135,10 +135,10 @@ async def test_add_members_idempotent(db: AsyncSession, actors: Actors) -> None:
         r = await c.post("/api/v1/chats", json={"title": "T", "member_ids": [actors.bob.id]})
         chat_id = r.json()["id"]
 
-        # carol новая, bob уже участник — идемпотентно
+        # carol новая, bob уже участник — идемпотентно (тело только member_ids, без title)
         r2 = await c.post(
             f"/api/v1/chats/{chat_id}/members",
-            json={"title": "x", "member_ids": [actors.carol.id, actors.bob.id]},
+            json={"member_ids": [actors.carol.id, actors.bob.id]},
         )
         assert r2.status_code == 204
 

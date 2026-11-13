@@ -17,6 +17,7 @@ from app.schemas.chat import (
     DirectCreatedOut,
     DirectCreateIn,
     MemberRoleIn,
+    MembersAddIn,
 )
 from app.schemas.user import UserOut
 from app.services import chats as chat_service
@@ -145,8 +146,8 @@ async def get_chat(chat_id: ChatId, me: UserDep, db: DbDep) -> ChatDetailOut:
 
 
 @router.post("/chats/{chat_id}/members", status_code=204)
-async def add_members(chat_id: str, body: ChatCreateIn, me: UserDep, db: DbDep) -> None:
-    # тело переиспользуем: member_ids[]; title игнорируется
+async def add_members(chat_id: str, body: MembersAddIn, me: UserDep, db: DbDep) -> None:
+    """Добавление участников (admin/owner; уже состоящие пропускаются — идемпотентно, §12)."""
     await chat_service.add_members(
         db, chat_id=chat_id, actor_id=me.id, member_ids=body.member_ids
     )
