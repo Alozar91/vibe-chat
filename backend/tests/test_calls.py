@@ -165,17 +165,11 @@ async def test_direct_call_happy_path(db: AsyncSession, actors: Actors) -> None:
         assert r3.json()["status"] == "active"
         assert r3.json()["started_at"] is not None
 
-        # bob выходит — alice ещё в звонке → active
+        # bob сбрасывает — direct 1:1: звонок завершается для обоих (§17)
         r4 = await c.post(f"/api/v1/calls/{call_id}/leave")
         assert r4.status_code == 200
-        assert r4.json()["status"] == "active"
-
-        # alice выходит — активных не осталось → ended
-        actors.act_as("alice")
-        r5 = await c.post(f"/api/v1/calls/{call_id}/leave")
-        assert r5.status_code == 200
-        assert r5.json()["status"] == "ended"
-        assert r5.json()["ended_at"] is not None
+        assert r4.json()["status"] == "ended"
+        assert r4.json()["ended_at"] is not None
 
     # system-сообщение о звонке в ленте
     actors.act_as("alice")

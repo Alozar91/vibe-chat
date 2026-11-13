@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.call import Call, CallParticipant
+from app.models.chat import Chat
 from app.models.user import User
 from app.services import realtime as rt
 from fastapi import HTTPException, status
@@ -193,7 +194,12 @@ async def join_call(db: AsyncSession, *, actor: User, call_id: str) -> Call:
 
 
 async def leave_call(db: AsyncSession, *, actor: User, call_id: str) -> Call:
-    """Выход; последний активный участник → ended (+ system-сообщение); call.left (§17)."""
+    """Выход участника; call.left (§17).
+
+    Direct 1:1 — выход одного завершает звонок для обоих (как Telegram):
+    висящий «звонок» у собеседника при сбросе бессмысленен.
+    Group — звонок живёт, пока не вышли все (последний → ended).
+    """
     call = await get_call_checked(db, call_id)
     from app.services import chats as chat_service
 
@@ -201,7 +207,10 @@ async def leave_call(db: AsyncSession, *, actor: User, call_id: str) -> Call:
     part = await db.get(CallParticipant, (call.id, actor.id))
     if part is not None and part.left_at is None:
         part.left_at = _now()
-    if call.status == "active" and not await _active_participants(db, call.id):
+
+    chat = await db.get(Chat, call.chat_id)
+    direct_done = chat is not None and chat.type == "direct" and call.status == "active"
+    if direct_done or (call.status == "active" and not await _active_participants(db, call.id)):
         call.status = "ended"
         call.ended_at = _now()
         await db.commit()

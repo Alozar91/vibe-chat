@@ -443,7 +443,7 @@ C. Видео: публикация камеры (simulcast — в SFU из ко
 REST (все мутации — REST, WS — только уведомления; require_member на всё):
 - `POST /calls` `{chat_id, kind}` → CallOut (direct → `ringing`; group → `ringing` + событие в группу)
 - `POST /calls/{id}/accept|reject|cancel` — direct-флоу (accept → `active` + `started_at`; reject/cancel → `ended`)
-- `POST /calls/{id}/join|leave` — group-флоу (и повторный вход при реконнекте); последний leave → `ended`
+- `POST /calls/{id}/join|leave` — group-флоу (и повторный вход при реконнекте); последний leave → `ended`. Leave в **direct**-звонке завершает звонок для обоих (1:1: сброс одним = конец звонка, как Telegram; решено 2026-11-13)
 - `POST /calls/{id}/token` → `{token, ws_url}` — room-токен LiveKit (только участник чата И звонка; TTL ~10 мин, payload: room = call.id, identity = user.id, publish/subscribe)
 
 WS-события (формат — `{call: <CallOut>}` либо `{call_id, user_id}` для joined/left): `call.ring`, `call.accepted`, `call.rejected`, `call.cancelled`, `call.joined`, `call.left`, `call.ended`. Ботам не доставляются (§10 — только `message.*`).
