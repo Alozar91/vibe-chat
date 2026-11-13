@@ -187,6 +187,70 @@ async def test_owner_transfer_and_leave(db: AsyncSession, actors: Actors) -> Non
 
 
 @pytest.mark.asyncio
+async def test_rename_group_and_system_message(db: AsyncSession, actors: Actors) -> None:
+    """PATCH /chats/{id} (admin/owner): title + system-сообщение (этап 12)."""
+    async with await ac() as c:
+        r = await c.post("/api/v1/chats", json={"title": "Старое", "member_ids": [actors.bob.id]})
+        chat_id = r.json()["id"]
+
+        actors.act_as("bob")  # member не может
+        r2 = await c.patch(f"/api/v1/chats/{chat_id}", json={"title": "Хак"})
+        assert r2.status_code == 403
+
+        actors.act_as("alice")
+        r3 = await c.patch(f"/api/v1/chats/{chat_id}", json={"title": "Новое"})
+        assert r3.status_code == 200
+        assert r3.json()["title"] == "Новое"
+
+        r4 = await c.get(f"/api/v1/chats/{chat_id}/messages")
+        system = [m for m in r4.json() if m["type"] == "system"]
+        assert len(system) == 1
+        assert system[0]["payload"]["kind"] == "rename"
+        assert system[0]["payload"]["title"] == "Новое"
+
+        # direct переименовать нельзя
+        rd = await c.post("/api/v1/chats/direct", json={"user_id": actors.bob.id})
+        rd2 = await c.patch(f"/api/v1/chats/{rd.json()['chat_id']}", json={"title": "X"})
+        assert rd2.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_member_role_management(db: AsyncSession, actors: Actors) -> None:
+    """PATCH /chats/{id}/members/{uid} (owner, этап 12): member↔admin, права и system-сообщение."""
+    async with await ac() as c:
+        r = await c.post("/api/v1/chats", json={"title": "T", "member_ids": [actors.bob.id, actors.carol.id]})
+        chat_id = r.json()["id"]
+
+        # member не может менять роли
+        actors.act_as("bob")
+        r_bad = await c.patch(f"/api/v1/chats/{chat_id}/members/{actors.carol.id}", json={"role": "admin"})
+        assert r_bad.status_code == 403
+
+        actors.act_as("alice")  # owner
+        # назначение admin
+        r2 = await c.patch(f"/api/v1/chats/{chat_id}/members/{actors.bob.id}", json={"role": "admin"})
+        assert r2.status_code == 200
+        assert r2.json()["role"] == "admin"
+
+        # owner не меняет роль owner'а и себя
+        r3 = await c.patch(f"/api/v1/chats/{chat_id}/members/{actors.alice.id}", json={"role": "member"})
+        assert r3.status_code == 422
+
+        # снятие admin
+        r4 = await c.patch(f"/api/v1/chats/{chat_id}/members/{actors.bob.id}", json={"role": "member"})
+        assert r4.status_code == 200 and r4.json()["role"] == "member"
+
+        # system-сообщения о смене роли
+        r5 = await c.get(f"/api/v1/chats/{chat_id}/messages")
+        kinds = [m["payload"]["kind"] for m in r5.json() if m["type"] == "system"]
+        assert kinds.count("role_changed") == 2
+
+        # невалидная роль
+        r6 = await c.patch(f"/api/v1/chats/{chat_id}/members/{actors.bob.id}", json={"role": "owner"})
+        assert r6.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_non_member_forbidden(db: AsyncSession, actors: Actors) -> None:
     async with await ac() as c:
         r = await c.post("/api/v1/chats", json={"title": "T", "member_ids": [actors.bob.id]})

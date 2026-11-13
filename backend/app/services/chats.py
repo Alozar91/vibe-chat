@@ -4,6 +4,7 @@ import uuid
 
 from app.models.chat import Chat, ChatMember, DirectChatKey
 from app.models.user import User
+from app.services import realtime as rt
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,7 +104,16 @@ async def add_members(db: AsyncSession, *, chat_id: str, actor_id: str, member_i
         await _get_active_user(db, uid)
         db.add(ChatMember(chat_id=chat_id, user_id=uid, role="member"))
         added.append(uid)
+    if not added:
+        return []
     await db.commit()
+    from app.services import messages as message_service
+
+    for uid in added:
+        await message_service.create_system_message(
+            db, chat_id=chat_id, kind="member_added", payload={"user_id": uid, "actor_id": actor_id}
+        )
+        await rt.publish_chat_event(db, chat_id, "member.joined", {"user_id": uid})
     return added
 
 
@@ -117,8 +127,16 @@ async def remove_member(db: AsyncSession, *, chat_id: str, actor_id: str, target
         raise HTTPException(status.HTTP_403_FORBIDDEN, "admin role required")
     if actor.role == "admin" and target.role == "admin" and actor_id != target_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "admin cannot remove admin")
+    leaving = actor_id == target_id
     await db.delete(target)
     await db.commit()
+    from app.services import messages as message_service
+
+    kind = "member_left" if leaving else "member_removed"
+    await message_service.create_system_message(
+        db, chat_id=chat_id, kind=kind, payload={"user_id": target_id, "actor_id": actor_id}
+    )
+    await rt.publish_chat_event(db, chat_id, "member.left", {"user_id": target_id})
 
 
 async def transfer_ownership(db: AsyncSession, *, chat_id: str, actor_id: str, new_owner_id: str) -> None:
@@ -132,9 +150,72 @@ async def transfer_ownership(db: AsyncSession, *, chat_id: str, actor_id: str, n
     actor.role = "admin"
     new_owner.role = "owner"
     await db.commit()
+    from app.services import messages as message_service
+
+    await message_service.create_system_message(
+        db,
+        chat_id=chat_id,
+        kind="owner_changed",
+        payload={"user_id": new_owner_id, "actor_id": actor_id},
+    )
+
+
+async def rename_group(db: AsyncSession, *, chat_id: str, actor_id: str, title: str) -> Chat:
+    """Переименование группы (admin/owner, §12): title + system-сообщение + chat.updated (§9)."""
+    chat = await db.get(Chat, chat_id)
+    assert chat is not None
+    if chat.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "chat not found")
+    if chat.type != "group":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "only group chats can be renamed")
+    await require_chat_admin(db, chat_id, actor_id)
+    if chat.title == title:
+        return chat
+    chat.title = title
+    await db.commit()
+    from app.services import messages as message_service
+
+    await message_service.create_system_message(
+        db, chat_id=chat_id, kind="rename", payload={"title": title, "actor_id": actor_id}
+    )
+    return chat
+
+
+async def set_member_role(
+    db: AsyncSession, *, chat_id: str, actor_id: str, target_id: str, role: str
+) -> ChatMember:
+    """Смена роли участника (owner; этап 12): member↔admin + system-сообщение.
+
+    Owner не понижает сам себя через этот эндпоинт (передача владения — отдельный
+    эндпоинт); admin'ов меняет только owner; system/бот-аккаунты — обычные участники.
+    """
+    actor = await require_member(db, chat_id, actor_id)
+    if actor.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner role required")
+    if role not in ("admin", "member"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "role must be admin|member")
+    target = await require_member(db, chat_id, target_id)
+    if target.user_id == actor_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "cannot change own role")
+    if target.role == "owner":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "cannot change owner role (transfer ownership)")
+    if target.role == role:
+        return target
+    target.role = role
+    await db.commit()
+    from app.services import messages as message_service
+
+    await message_service.create_system_message(
+        db,
+        chat_id=chat_id,
+        kind="role_changed",
+        payload={"user_id": target_id, "role": role, "actor_id": actor_id},
+    )
+    return target
 
 
 async def list_user_chats(db: AsyncSession, user_id: str) -> list[Chat]:
+    """Чаты пользователя (active, §6)."""
     stmt = (
         select(Chat)
         .join(ChatMember, ChatMember.chat_id == Chat.id)

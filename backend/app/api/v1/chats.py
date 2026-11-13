@@ -13,8 +13,10 @@ from app.schemas.chat import (
     ChatDetailOut,
     ChatMemberOut,
     ChatOut,
+    ChatRenameIn,
     DirectCreatedOut,
     DirectCreateIn,
+    MemberRoleIn,
 )
 from app.schemas.user import UserOut
 from app.services import chats as chat_service
@@ -154,6 +156,30 @@ async def add_members(chat_id: str, body: ChatCreateIn, me: UserDep, db: DbDep) 
 async def remove_member(chat_id: str, user_id: str, me: UserDep, db: DbDep) -> None:
     await chat_service.remove_member(
         db, chat_id=chat_id, actor_id=me.id, target_id=user_id
+    )
+
+
+@router.patch("/chats/{chat_id}", response_model=ChatOut)
+async def rename_chat(chat_id: str, body: ChatRenameIn, me: UserDep, db: DbDep) -> ChatOut:
+    """Переименование группы (admin/owner, §12): system-сообщение + chat.updated (§9)."""
+    chat = await chat_service.rename_group(db, chat_id=chat_id, actor_id=me.id, title=body.title)
+    await rt.publish_chat_event(db, chat_id, "chat.updated", {})
+    return (await _chat_outs(db, [chat], me.id))[0]
+
+
+@router.patch("/chats/{chat_id}/members/{user_id}", response_model=ChatMemberOut)
+async def set_member_role(chat_id: str, user_id: str, body: MemberRoleIn, me: UserDep, db: DbDep) -> ChatMemberOut:
+    """Смена роли участника (owner, этап 12): member↔admin."""
+    member = await chat_service.set_member_role(
+        db, chat_id=chat_id, actor_id=me.id, target_id=user_id, role=body.role
+    )
+    user = await db.get(User, user_id)
+    assert user is not None
+    return ChatMemberOut(
+        user_id=member.user_id,
+        role=member.role,
+        last_read_message_id=member.last_read_message_id,
+        user=UserOut.model_validate(user),
     )
 
 

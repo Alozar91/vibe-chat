@@ -8,6 +8,7 @@ from app.models.file import File
 from app.models.message import Attachment, Message
 from app.models.user import User
 from app.services import chats as chat_service
+from app.services import realtime as rt
 from app.services.files import attachment_url
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -311,6 +312,9 @@ async def forward_message(
     """
     source = await get_message_checked(db, message_id)
     await chat_service.require_member(db, source.chat_id, actor.id)  # источник — чат, где состою (§7)
+    if source.type == "system":
+        # §9: system-сообщения нельзя цитировать, пересылать и редактировать
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "system messages cannot be forwarded")
 
     target_ids = list(dict.fromkeys(chat_ids))
     if source.chat_id in target_ids:
@@ -376,6 +380,39 @@ async def forward_message(
     for copy in created:
         await db.refresh(copy)
     return created
+
+
+async def create_system_message(
+    db: AsyncSession, *, chat_id: str, kind: str, payload: dict[str, Any]
+) -> Message:
+    """System-сообщение о событии группы (§9): sender NULL, payload.kind — тип события.
+
+    Публикует message.new участникам; used by chats-сервис (rename/members/owner/role).
+    """
+    message = Message(
+        id=_new_message_id(),
+        chat_id=chat_id,
+        sender_id=None,
+        type="system",
+        text=SYSTEM_TEXTS.get(kind, kind),
+        payload={"kind": kind, **payload},
+        timezone=None,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+    await rt.publish_message_new(db, message)
+    return message
+
+
+SYSTEM_TEXTS = {
+    "rename": "название изменено",
+    "member_added": "участник добавлен",
+    "member_removed": "участник исключён",
+    "member_left": "участник вышел",
+    "owner_changed": "владение передано",
+    "role_changed": "роль изменена",
+}
 
 
 async def list_messages(

@@ -1,11 +1,13 @@
 /** Лента чата: сообщения, реакции, цитирование, typing, отправка (§7, §9). */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Paperclip, Send, X } from 'lucide-react'
+import { Paperclip, Send, Settings2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { chatsApi, messagesApi, uploadFile, usersApi } from '@/api/client'
 import type { Message } from '@/api/types'
+import { ForwardDialog } from '@/components/ForwardDialog'
+import { GroupInfoDialog } from '@/components/GroupInfoDialog'
 import { MessageBubble } from '@/components/MessageBubble'
 import { useWsStore } from '@/realtime/ws'
 import { sendTyping } from '@/realtime/ws'
@@ -80,6 +82,8 @@ export function ChatPage() {
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [editing, setEditing] = useState<Message | null>(null)
   const [pending, setPending] = useState<PendingAttachment[]>([])
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [forwarding, setForwarding] = useState<Message | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastReadRef = useRef<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -181,6 +185,8 @@ export function ChatPage() {
   const meId = me.data?.id ?? ''
   const members = chatDetails.data?.members ?? []
   const usersById = new Map(members.map((m) => [m.user_id, m.user]))
+  const myRole = members.find((m) => m.user_id === meId)?.role
+  const canManageGroup = chatDetails.data?.type === 'group' && (myRole === 'owner' || myRole === 'admin')
 
   const typingUsers = Object.entries(typing[chatId] ?? {})
     .filter(([uid]) => uid !== meId)
@@ -247,6 +253,15 @@ export function ChatPage() {
                 : 'не в сети'}
           </div>
         </div>
+        {canManageGroup && (
+          <button
+            title="Управление группой"
+            onClick={() => setInfoOpen(true)}
+            className="ml-auto rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground"
+          >
+            <Settings2 className="size-5" />
+          </button>
+        )}
       </header>
 
       {/* Лента */}
@@ -273,6 +288,10 @@ export function ChatPage() {
               onEdit={() => {
                 setEditing(m)
                 setText(m.text ?? '')
+                setReplyTo(null)
+              }}
+              onForward={() => {
+                setForwarding(m)
                 setReplyTo(null)
               }}
             />
@@ -382,6 +401,14 @@ export function ChatPage() {
         </button>
         </div>
       </div>
+
+      {/* Диалоги (этап 12): управление группой и пересылка */}
+      {chatDetails.data && infoOpen && (
+        <GroupInfoDialog chat={chatDetails.data} meId={meId} onClose={() => setInfoOpen(false)} />
+      )}
+      {forwarding && meId && (
+        <ForwardDialog message={forwarding} meId={meId} onClose={() => setForwarding(null)} />
+      )}
     </div>
   )
 }

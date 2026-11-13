@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from app.schemas.user import UserOut
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatMemberOut(BaseModel):
@@ -49,6 +49,18 @@ class ChatCreateIn(BaseModel):
 
 class DirectCreateIn(BaseModel):
     user_id: str
+
+
+class ChatRenameIn(BaseModel):
+    """PATCH /chats/{id} — {title} (admin/owner, §12, этап 12)."""
+
+    title: str = Field(min_length=1, max_length=255)
+
+
+class MemberRoleIn(BaseModel):
+    """PATCH /chats/{id}/members/{user_id} — {role: admin|member} (owner, этап 12)."""
+
+    role: str
 
 
 class DirectCreatedOut(BaseModel):

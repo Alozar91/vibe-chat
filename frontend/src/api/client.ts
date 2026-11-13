@@ -1,6 +1,6 @@
 /** Тонкий fetch-клиент /api/v1: Bearer из OIDC, 401 → silent renew → retry (§5). */
 
-import type { Chat, ChatDetails, FileOut, Invite, InviteCreated, Message, User } from './types'
+import type { Chat, ChatDetails, ChatMember, FileOut, Invite, InviteCreated, Message, User } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -122,6 +122,9 @@ export const chatsApi = {
   // бэкенд отвечает {chat_id, created} (§12) — не Chat
   createDirect: (userId: string) => api.post<{ chat_id: string; created: boolean }>('/chats/direct', { user_id: userId }),
   rename: (id: string, title: string) => api.patch<Chat>(`/chats/${id}`, { title }),
+  setMemberRole: (id: string, userId: string, role: 'admin' | 'member') =>
+    api.patch<ChatMember>(`/chats/${id}/members/${userId}`, { role }),
+  transferOwnership: (id: string, userId: string) => api.post<void>(`/chats/${id}/owner`, { user_id: userId }),
   delete: (id: string) => api.delete<void>(`/chats/${id}`),
   addMembers: (id: string, memberIds: string[]) =>
     api.post<void>(`/chats/${id}/members`, { member_ids: memberIds }),

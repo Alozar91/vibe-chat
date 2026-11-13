@@ -70,6 +70,14 @@ export function WsEventsBridge({ queryClient }: { queryClient: QueryClient }) {
           if (deleted) void queryClient.removeQueries({ queryKey: ['chat', chat.id] })
           break
         }
+        case 'member.joined':
+        case 'member.left': {
+          // изменение состава (этап 12): publish_chat_event шлёт {chat: ChatOut, user_id}
+          const { chat } = e.data as { chat?: Chat }
+          if (chat?.id) void queryClient.invalidateQueries({ queryKey: ['chat', chat.id] })
+          void queryClient.invalidateQueries({ queryKey: ['chats'] })
+          break
+        }
         case 'read': {
           const { chat_id, user_id, last_read_message_id } = e.data as {
             chat_id: string

@@ -1,7 +1,7 @@
 /** Пузырь сообщения: текст/вложения, цитата, реакции, меню (reply/edit/delete/react). */
 
 import { useMutation } from '@tanstack/react-query'
-import { MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react'
+import { Forward, MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { messagesApi } from '@/api/client'
 import type { Message, User } from '@/api/types'
@@ -17,6 +17,7 @@ interface Props {
   replyTarget: Message | undefined
   onReply: () => void
   onEdit: () => void
+  onForward: () => void
 }
 
 export function MessageBubble({
@@ -29,6 +30,7 @@ export function MessageBubble({
   replyTarget,
   onReply,
   onEdit,
+  onForward,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [reactbarOpen, setReactbarOpen] = useState(false)
@@ -147,6 +149,9 @@ export function MessageBubble({
                 <Pencil className="size-3.5" />
               </button>
             )}
+            <button title="Переслать" onClick={onForward} className="rounded p-1 hover:bg-panel-2">
+              <Forward className="size-3.5" />
+            </button>
             <button
               title="Удалить"
               onClick={() => deleteMsg.mutate()}

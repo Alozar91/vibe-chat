@@ -59,6 +59,7 @@ function renderBubble(msg: Message) {
         replyTarget={undefined}
         onReply={() => {}}
         onEdit={() => {}}
+        onForward={() => {}}
       />
     </QueryClientProvider>,
   )
