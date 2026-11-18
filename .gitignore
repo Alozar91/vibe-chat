@@ -13,6 +13,7 @@ frontend/dist/
 
 # Env / secrets
 .env
+deploy/server.env
 *.local
 
 # OS / IDE
