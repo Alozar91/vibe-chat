@@ -67,7 +67,7 @@
       "webOrigins": [
         "http://localhost:5173",
         "http://localhost:3000",
-        "${env.VIBE_PUBLIC_URL}"
+        "${env.VIBE_PUBLIC_ORIGIN}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"

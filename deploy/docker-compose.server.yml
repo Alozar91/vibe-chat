@@ -1,9 +1,14 @@
 # Vibe Chat — тестовый стенд: системный nginx хоста с location /chat (Docs/concept.md §13).
-# Схема (решено 2026-11-13): nginx отдельным сервисом системы, ДВЕ секции:
-#   location /know → http://localhost:<порт другого проекта>
-#   location /chat → http://localhost:8090 (vibe-chat: фронт+API+WS, см. nginx-location-snippet)
+# Схема (решено 2026-11-13): nginx отдельным сервисом системы — единая точка входа,
+#   /know → 127.0.0.1:8082 (vibe-know, его контейнерный nginx; деплой позже)
+#   /chat → 127.0.0.1:8090 (vibe-chat: фронт+API+WS, см. nginx-location-snippet.conf)
 # Чужие конфиги не трогаются: vibe-chat живёт на своих localhost-портах.
 # Локальная работа nginx не использует.
+#
+# Порты vibe-chat на хосте (все 127.0.0.1, кроме LiveKit):
+#   8090 frontend-nginx | 8002 backend (debug; 8001 занят kb-api) | 8081 Keycloak
+#   9002 Silo S3 API (presigned /silo/) | 9003 Silo-консоль | 7881+UDP LiveKit
+# Порты vibe-know (при деплое): 8082 nginx | 8001 api | 8080 KC | 5432/6379/9090…
 #
 # Запуск: docker compose -f deploy/docker-compose.server.yml --env-file deploy/server.env up -d --build
 # Сниппет для системного nginx — deploy/nginx-location-snippet.conf
@@ -58,7 +63,7 @@ services:
       keycloak:
         condition: service_started
     ports:
-      - "127.0.0.1:8001:8000"  # системный nginx → /chat/api/
+      - "127.0.0.1:8002:8000"  # debug-порт; kb-api тоже на 8001 → здесь 8002. Роутинг — через frontend-контейнер (docker-сеть), хост-порт не участвует
 
   postgres:
     image: postgres:18
@@ -87,11 +92,12 @@ services:
       # CORS: presigned PUT — same-origin через системный nginx (/silo/ → silo:9000),
       # но разрешим и localhost:5173 на всякий случай для dev-сценариев
       MINIO_API_CORS_ALLOW_ORIGIN: https://${VIBE_DOMAIN}
-    command: server /data
+    command: server /data --console-address ":9001"
     expose:
       - "9000"
     ports:
-      - "127.0.0.1:9001:9001"  # админка Silo (консоль) только с localhost
+      - "127.0.0.1:9002:9000"   # S3 API — системный nginx → /silo/ (presigned)
+      - "127.0.0.1:9003:9001"   # консоль — только с localhost
     volumes:
       - silodata:/data
 
@@ -102,7 +108,10 @@ services:
       KC_HOSTNAME: https://${VIBE_DOMAIN}:8444
       KC_HOSTNAME_STRICT: "false"
       KC_PROXY_HEADERS: xforwarded
+      # redirectUris клиента frontend — https://домен/chat/* (подпуть SPA)
       VIBE_PUBLIC_URL: https://${VIBE_DOMAIN}/chat
+      # webOrigins — origin БЕЗ пути (CORS токен-запросов SPA → KC:8444)
+      VIBE_PUBLIC_ORIGIN: https://${VIBE_DOMAIN}
       KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
       KC_HEALTH_ENABLED: "true"
