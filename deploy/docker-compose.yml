@@ -52,6 +52,7 @@ services:
       # без переменных импорт упадёт на невалидном redirect URI
       VIBE_PUBLIC_URL: http://localhost:5173
       VIBE_PUBLIC_ORIGIN: http://localhost:5173
+      KC_BACKEND_ADMIN_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
     ports:
       - "8080:8080"
     volumes:

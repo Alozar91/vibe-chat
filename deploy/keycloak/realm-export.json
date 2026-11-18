@@ -101,7 +101,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-      "secret": "change-me-backend-admin-secret",
+      "secret": "${KC_BACKEND_ADMIN_SECRET}",
       "defaultClientScopes": [
         "basic",
         "profile",
