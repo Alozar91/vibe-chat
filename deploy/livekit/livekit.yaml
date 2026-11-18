@@ -1,13 +1,15 @@
 # LiveKit SFU (Docs/concept.md §17) — один контейнер, без Redis при одной ноде.
 # Порты (§13): 7880/tcp — WS-сигналинг клиентов, 7881/tcp — TCP-fallback ICE,
 # UDP-диапазон — медиа (должен быть открыт на хосте), TURN TLS 443 — coturn отдельно.
-# ВНИМАНИЕ: для Windows-dev диапазон сужен до 51000–52000 (Hyper-V резервирует
-# 50000–50059 и динамические куски выше); на VPS вернуть 50000–60000.
+# ВНИМАНИЕ: для Windows-dev диапазон 40000–40100 — НИЖЕ динамического
+# диапазона Windows (49152+): Hyper-V/WinNAT резервирует случайные куски
+# в 49152–65535 после каждого ребута. На VPS — свой конфиг (livekit-server.yaml,
+# 50000–60000).
 port: 7880
 rtc:
   tcp_port: 7881
-  port_range_start: 51000
-  port_range_end: 52000
+  port_range_start: 40000
+  port_range_end: 40100
   # use_external_ip — только для VPS с публичным IP на интерфейсе. На dev-машине
   # за NAT он даёт недостижимые кандидаты (hairpin NAT не работает) → ICE failed.
   # Dev-адрес задаётся флагом --node-ip в compose (LIVEKIT_NODE_IP, default 127.0.0.1 —
