@@ -17,6 +17,7 @@ name: vibe-chat-server
 services:
   frontend:
     image: nginx:1.27-alpine
+    restart: unless-stopped
     depends_on: []
     ports:
       - "127.0.0.1:8090:80"   # системный nginx ходит сюда (location /chat)
@@ -132,6 +133,11 @@ services:
     # без --node-ip: use_external_ip: true сам определит публичный IP
     # (VIBE_DOMAIN — доменное имя, флагу нужен IP)
     command: --config /etc/livekit.yaml
+    # STUN-резолв: resolv.conf хоста указывает на stub systemd-resolved
+    # (127.0.0.53), недоступный изнутри контейнера → без явного dns
+    # livekit падает "could not resolve external IP"
+    dns: [1.1.1.1, 8.8.8.8]
+    restart: unless-stopped
     environment:
       # ключи обязательны (server.env): одновременно и SFU, и бэкенд
       # (APP_LIVEKIT_API_KEY/SECRET) — источник один, рассинхрон исключён
