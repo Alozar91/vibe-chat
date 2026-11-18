@@ -144,7 +144,11 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
       - "7881:7881"
-      - "50000-60000:50000-60000/udp"
+      # 100 портов достаточно для MVP-стенда (~25-50 одновременных звонков);
+      # полный диапазон 50000-60000 не даёт преимуществ, а docker-proxy на
+      # каждый опубликованный UDP-порт (userland) съедает ГБ памяти (набл. 2026-11-18).
+      # Для прода: userland-proxy=false в daemon.json либо один mux-порт.
+      - "50000-50100:50000-50100/udp"
     volumes:
       - ./livekit/livekit-server.yaml:/etc/livekit.yaml:ro
 

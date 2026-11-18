@@ -1,6 +1,7 @@
 # LiveKit SFU — серверный конфиг (Docs/concept.md §17, deploy/docker-compose.server.yml).
 # VPS с выделенным IP: use_external_ip даёт достижимые кандидаты (dev-проблема
-# hairpin NAT здесь не актуальна). Полный диапазон UDP 50000–60000.
+# hairpin NAT здесь не актуальна). Диапазон UDP 50000–50100 (100 портов —
+# достаточно для MVP-стенда; соответствие ports в docker-compose.server.yml обязательно).
 #
 # API-ключи здесь НЕ задаются сознательно: единственный источник —
 # LIVEKIT_KEYS env из compose (= LIVEKIT_API_KEY/LIVEKIT_API_SECRET из
@@ -10,6 +11,7 @@
 port: 7880
 rtc:
   tcp_port: 7881
+  # 100 портов достаточно для MVP-стенда; соответствие ports в compose обязательно
   port_range_start: 50000
-  port_range_end: 60000
+  port_range_end: 50100
   use_external_ip: true
