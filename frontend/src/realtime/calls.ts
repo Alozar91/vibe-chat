@@ -168,6 +168,14 @@ async function connectMedia(): Promise<void> {
     }
     lkRoom.on(RoomEvent.ParticipantConnected, syncRemote)
     lkRoom.on(RoomEvent.ParticipantDisconnected, syncRemote)
+    // удалённый звук/видео нужно явно проигрывать: без attach() треки
+    // подписываются, но в DOM не попадают → тишина (набл. 2026-11-18)
+    lkRoom.on(RoomEvent.TrackSubscribed, (track) => {
+      track.attach()
+    })
+    lkRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach()
+    })
     lkRoom.on(RoomEvent.Disconnected, () => {
       if (useCallsStore.getState().room === lkRoom) {
         useCallsStore.setState({ media: 'idle', remoteIds: [] })
