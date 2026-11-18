@@ -94,7 +94,14 @@ async def main() -> None:
             await db.flush()
             print("  пользователь уже был в БД — привязан keycloak_sub")
         else:
-            print("  пользователь уже был в БД — OK")
+            # KC без своей БД (dev-file): пересоздание контейнера = новые KC-id;
+            # перепривязываем sub, иначе логин сломается молча
+            if user.keycloak_sub != kc_id:
+                user.keycloak_sub = kc_id
+                await db.commit()
+                print("  keycloak_sub перепривязан (KC-контейнер пересоздавался)")
+            else:
+                print("  пользователь уже был в БД — OK")
 
         # Первый инвайт: если ещё нет ни одного действующего
         active = await db.scalar(select(Invite).where(Invite.deactivated_at.is_(None)))

@@ -105,7 +105,9 @@ services:
 
   keycloak:
     image: keycloak/keycloak:26.8
-    command: start-dev --import-realm -Dkeycloak.migration.replace-placeholders=true
+    # ${VIBE_PUBLIC_URL/ORIGIN} из realm-export.json подставляются из env
+    # при --import-realm (KC 26: плейсхолдеры без префикса env.)
+    command: start-dev --import-realm
     environment:
       KC_HOSTNAME: https://${VIBE_DOMAIN}:8444
       KC_HOSTNAME_STRICT: "false"

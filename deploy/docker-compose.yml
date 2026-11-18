@@ -48,6 +48,10 @@ services:
       KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
       KC_HEALTH_ENABLED: "true"
+      # плейсхолдеры realm-export.json (подставляются при --import-realm):
+      # без переменных импорт упадёт на невалидном redirect URI
+      VIBE_PUBLIC_URL: http://localhost:5173
+      VIBE_PUBLIC_ORIGIN: http://localhost:5173
     ports:
       - "8080:8080"
     volumes:
