@@ -44,8 +44,8 @@ services:
       APP_KEYCLOAK_AUDIENCE: backend-api
       APP_KEYCLOAK_ADMIN_CLIENT_ID: backend-admin
       APP_KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
-      APP_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
-      APP_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+      APP_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      APP_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       APP_LIVEKIT_WS_URL: wss://${VIBE_DOMAIN}/livekit
       APP_CALL_RING_TIMEOUT_SECONDS: 45
       # seed платформенного админа (python -m app.scripts.seed_admin, §13)
@@ -124,9 +124,13 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
-    command: --config /etc/livekit.yaml --node-ip ${VIBE_DOMAIN}
+    # без --node-ip: use_external_ip: true сам определит публичный IP
+    # (VIBE_DOMAIN — доменное имя, флагу нужен IP)
+    command: --config /etc/livekit.yaml
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret}"
+      # ключи обязательны (server.env): одновременно и SFU, и бэкенд
+      # (APP_LIVEKIT_API_KEY/SECRET) — источник один, рассинхрон исключён
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
       - "7881:7881"
       - "50000-60000:50000-60000/udp"

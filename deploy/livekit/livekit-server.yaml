@@ -1,12 +1,15 @@
 # LiveKit SFU — серверный конфиг (Docs/concept.md §17, deploy/docker-compose.server.yml).
 # VPS с выделенным IP: use_external_ip даёт достижимые кандидаты (dev-проблема
 # hairpin NAT здесь не актуальна). Полный диапазон UDP 50000–60000.
+#
+# API-ключи здесь НЕ задаются сознательно: единственный источник —
+# LIVEKIT_KEYS env из compose (= LIVEKIT_API_KEY/LIVEKIT_API_SECRET из
+# server.env). env-флаг перекрывает yaml (порядок: defaults → yaml → флаги),
+# а без ключей сервер не примет ни один токен — конфиг fail-closed:
+# забытые в server.env ключи не оставят активным дефолтный devkey.
 port: 7880
 rtc:
   tcp_port: 7881
   port_range_start: 50000
   port_range_end: 60000
   use_external_ip: true
-keys:
-  # реальные ключи — через env compose (LIVEKIT_API_KEY/LIVEKIT_API_SECRET)
-  devkey: devsecret
