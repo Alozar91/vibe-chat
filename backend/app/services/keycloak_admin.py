@@ -69,6 +69,18 @@ class KeycloakAdminClient:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, "keycloak user id missing")
         return kc_id
 
+    async def set_password(self, *, kc_user_id: str, password: str) -> None:
+        """Сброс пароля существующего пользователя (seed: переиспользование/recovery)."""
+        token = await self._token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(
+                f"{self._base_url}/admin/realms/{self._realm}/users/{kc_user_id}/reset-password",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"type": "password", "value": password, "temporary": False},
+            )
+        if resp.status_code != 204:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "keycloak password reset failed")
+
     async def delete_user(self, kc_user_id: str) -> None:
         """Компенсация при проигрыше гонки за инвайт (§5)."""
         token = await self._token()

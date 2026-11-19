@@ -95,10 +95,11 @@ export const usersApi = {
   get: (id: string) => api.get<User>(`/users/${id}`),
 }
 
-// --- Auth (регистрация по инвайту, без токена) ---
+// --- Auth (регистрация, без токена) ---
 
 export interface RegisterPayload {
-  invite_code: string
+  /** опционален (§5): без кода — открытая регистрация (APP_OPEN_REGISTRATION) */
+  invite_code?: string
   username: string
   password: string
   first_name?: string

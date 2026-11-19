@@ -1,13 +1,19 @@
-/** Регистрация по инвайт-ссылке/коду (§5): credentials → Keycloak, персональные данные → система. */
+/** Регистрация (§5): credentials → Keycloak, персональные данные → система.
+ *
+ * Инвайт-код опционален (открытая регистрация — APP_OPEN_REGISTRATION на
+ * сервере). После успеха — автовход direct grant'ом (одна форма — один ввод
+ * данных, §5); не удался — fallback: ссылка на обычный вход.
+ */
 
 import { useMutation } from '@tanstack/react-query'
 import { MessageSquare } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { registerWithInvite } from '@/api/client'
+import { signinResourceOwner } from '@/auth/oidc'
 
 export function RegisterPage() {
-  // код из инвайт-ссылки /register?code=… (§5): поле скрыто, код предзаполнен
+  // код из инвайт-ссылки /register?code=… (§5); без ссылки поле пустое и необязательное
   const [params] = useSearchParams()
   const urlCode = params.get('code') ?? ''
   const [inviteCode, setInviteCode] = useState(urlCode)
@@ -17,11 +23,13 @@ export function RegisterPage() {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [autoLoginFailed, setAutoLoginFailed] = useState(false)
+  const navigate = useNavigate()
 
   const register = useMutation({
     mutationFn: () =>
       registerWithInvite({
-        invite_code: inviteCode.trim(),
+        invite_code: inviteCode.trim() || undefined,
         username: username.trim(),
         password,
         first_name: firstName.trim() || undefined,
@@ -29,6 +37,14 @@ export function RegisterPage() {
         email: email.trim() || undefined,
         display_name: displayName.trim() || undefined,
       }),
+    // автовход: ROPC с только что введёнными credentials (пароль уходит только в KC)
+    onSuccess: async () => {
+      if (await signinResourceOwner(username.trim(), password)) {
+        navigate('/', { replace: true })
+      } else {
+        setAutoLoginFailed(true) // fallback: обычный вход через Keycloak
+      }
+    },
   })
 
   const errorText = (): string => {
@@ -41,6 +57,8 @@ export function RegisterPage() {
         return 'Код больше не действует (истёк, исчерпан или отключён)'
       case 409:
         return 'Имя пользователя уже занято'
+      case 422:
+        return 'Регистрация без инвайт-кода закрыта на этом сервере'
       case 502:
         return 'Сервис аутентификации недоступен, попробуйте позже'
       case 503:
@@ -76,8 +94,7 @@ export function RegisterPage() {
             <input
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
-              placeholder="Инвайт-код (vh_…)"
-              required
+              placeholder="Инвайт-код (vh_…) — если есть"
               className={inputCls}
             />
           )}
@@ -134,11 +151,14 @@ export function RegisterPage() {
           </div>
 
           {register.isError && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">{errorText()}</div>}
-          {register.isSuccess && (
+          {register.isSuccess && !autoLoginFailed && (
+            <div className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">Аккаунт создан, входим…</div>
+          )}
+          {register.isSuccess && autoLoginFailed && (
             <div className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
-              Аккаунт создан! Теперь{' '}
+              Аккаунт создан!{' '}
               <Link to="/login" className="underline">
-                войдите
+                Войдите
               </Link>{' '}
               под своими логином и паролем.
             </div>

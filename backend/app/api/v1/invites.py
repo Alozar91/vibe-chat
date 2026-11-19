@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from app.api.deps import UserDep
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.schemas.user import UserOut
 from app.services import invites as invite_service
@@ -30,7 +31,9 @@ class RegisterIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    invite_code: str = Field(min_length=1, max_length=256)
+    # опционален (§5): None/"" — открытая регистрация (APP_OPEN_REGISTRATION=true),
+    # иначе 422; переданный код проверяется и потребляется как обычно
+    invite_code: str | None = Field(default=None, max_length=256)
     username: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=128)
     first_name: str | None = Field(default=None, max_length=255)
@@ -63,15 +66,17 @@ class InviteCreatedOut(InviteOut):
 
 @router.post("/auth/register", response_model=UserOut, status_code=201)
 async def register(body: RegisterIn, db: DbDep) -> UserOut:
-    """Инвайт-регистрация (§5): KC-аккаунт (username+password) + пользователь системы.
+    """Регистрация (§5): KC-аккаунт (username+password) + пользователь системы.
 
     Персональные данные — только в PostgreSQL; Keycloak персональных данных не
-    получает. Не настроен Admin API → 503; код невалиден → 404/410; username
-    занят → 409; Keycloak недоступен → 502.
+    получает. Не настроен Admin API → 503; код невалиден → 404/410; кода нет и
+    открытая регистрация выключена → 422; username занят → 409; Keycloak
+    недоступен → 502.
     """
     user = await invite_service.register(
         db,
         invite_code=body.invite_code,
+        open_registration=get_settings().open_registration,
         username=body.username,
         password=body.password,
         first_name=body.first_name,

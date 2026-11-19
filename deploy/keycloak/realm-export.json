@@ -17,29 +17,6 @@
   },
   "users": [
     {
-      "username": "admin",
-      "enabled": true,
-      "email": "admin@vibe.local",
-      "emailVerified": true,
-      "firstName": "Платформенный",
-      "lastName": "Админ",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "admin",
-          "temporary": false
-        }
-      ],
-      "attributes": {
-        "is_platform_admin": [
-          "true"
-        ],
-        "timezone": [
-          "Europe/Moscow"
-        ]
-      }
-    },
-    {
       "username": "service-account-backend-admin",
       "enabled": true,
       "serviceAccountClientId": "backend-admin",
@@ -58,7 +35,7 @@
       "protocol": "openid-connect",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:5173/*",
         "http://localhost:3000/*",
