@@ -66,8 +66,9 @@ export function MessageBubble({
   }
 
   const deleted = m.deleted_at !== null
-  const image = !deleted ? m.attachments.find((a) => a.kind === 'image') : undefined
-  const file = !deleted && !image ? m.attachments[0] : undefined
+  // все картинки сеткой; файлы — списком карточек (§8: до 10 вложений)
+  const images = !deleted ? m.attachments.filter((a) => a.kind === 'image') : []
+  const files = !deleted ? m.attachments.filter((a) => a.kind !== 'image') : []
 
   return (
     <div className={`group my-1 flex gap-2 ${isMine ? 'justify-end' : 'justify-start'}`}>
@@ -105,24 +106,31 @@ export function MessageBubble({
           <span className="italic text-muted">Сообщение удалено</span>
         ) : (
           <>
-            {image && (
-              <img
-                src={image.thumb_url ?? image.url}
-                alt={image.name ?? ''}
-                className="mb-1 max-h-64 rounded-lg"
-              />
+            {images.length > 0 && (
+              <div className={`mb-1 grid gap-1 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                {images.map((a, i) => (
+                  <a key={a.url ?? i} href={a.url} target="_blank" rel="noreferrer">
+                    <img
+                      src={a.thumb_url ?? a.url}
+                      alt={a.name ?? ''}
+                      className="max-h-64 w-full rounded-lg object-cover"
+                    />
+                  </a>
+                ))}
+              </div>
             )}
-            {file && (
+            {files.map((a) => (
               <a
-                href={file.url}
+                key={a.url ?? a.name}
+                href={a.url}
                 target="_blank"
                 rel="noreferrer"
                 className="mb-1 flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5 hover:bg-black/30"
               >
-                <span>{file.kind === 'video' ? '🎬' : '📎'}</span>
-                <span className="truncate underline">{file.name ?? 'файл'}</span>
+                <span>{a.kind === 'video' ? '🎬' : '📎'}</span>
+                <span className="truncate underline">{a.name ?? 'файл'}</span>
               </a>
-            )}
+            ))}
             {m.text && <span className="whitespace-pre-wrap break-words">{m.text}</span>}
           </>
         )}
