@@ -265,17 +265,15 @@ export function ChatPage() {
             <Settings2 className="size-5" />
           </button>
         )}
-        {/* Кнопка звонка (§17, этап A — аудио): group до этапа B — без звонка */}
-        {chatDetails.data?.type === 'direct' && (
-          <button
-            title="Позвонить"
-            disabled={!!activeCall}
-            onClick={() => void callStart(chatId)}
-            className={`${canManageGroup ? '' : 'ml-auto'} rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground disabled:opacity-40`}
-          >
-            <Phone className="size-5" />
-          </button>
-        )}
+        {/* Кнопка звонка (§17): direct — ringing-модель, group — join-модель (этап B) */}
+        <button
+          title={chatDetails.data?.type === 'group' ? 'Открыть звонок в группе' : 'Позвонить'}
+          disabled={!!activeCall}
+          onClick={() => void callStart(chatId)}
+          className={`${canManageGroup ? '' : 'ml-auto'} rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground disabled:opacity-40`}
+        >
+          <Phone className="size-5" />
+        </button>
       </header>
 
       {/* Лента */}

@@ -101,18 +101,24 @@ async def start_call(
         # чужой незавершённый ринг — занято: 409
         raise HTTPException(status.HTTP_409_CONFLICT, "another call is in progress")
 
+    chat = await db.get(Chat, chat_id)
+    # §17, этап B: group — join-модель, комната открывается сразу active
+    # (без ринга каждому; остальные узнают по call.joined). direct — ringing.
+    initial_status = "active" if chat is not None and chat.type == "group" else "ringing"
     call = Call(
         id=_new_call_id(),
         chat_id=chat_id,
         initiator_id=actor.id,
         kind=kind,
-        status="ringing",
+        status=initial_status,
     )
     db.add(call)
     await db.flush()
     db.add(CallParticipant(call_id=call.id, user_id=actor.id))
+    if initial_status == "active":
+        call.started_at = _now()
     await db.commit()
-    await _publish_call(db, call, "call.ring")
+    await _publish_call(db, call, "call.joined" if initial_status == "active" else "call.ring")
     return call, True
 
 
@@ -241,12 +247,16 @@ async def _write_call_system(db: AsyncSession, call: Call) -> None:
 
 
 async def cleanup_stale_calls(db: AsyncSession, *, now: datetime | None = None) -> int:
-    """ringing старше TTL → ended + call_missed; active без участников → ended (§17)."""
+    """ringing старше TTL → ended + call_missed (только direct — group открывается
+    сразу active, §17 B); active без участников → ended (§17)."""
     now = now or _now()
     closed = 0
     stale_rings = (
         await db.scalars(
-            select(Call).where(
+            select(Call)
+            .join(Chat, Call.chat_id == Chat.id)
+            .where(
+                Chat.type == "direct",
                 Call.status == "ringing",
                 Call.created_at < datetime.fromtimestamp(now.timestamp() - CALL_TIMEOUT_SECONDS, tz=UTC),
             )

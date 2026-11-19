@@ -258,7 +258,9 @@ async def test_group_call_join_leave(db: AsyncSession, actors: Actors) -> None:
         r = await c.post("/api/v1/calls", json={"chat_id": chat_id, "kind": "audio"})
         assert r.status_code == 201, r.text
         call_id = r.json()["id"]
-        assert r.json()["status"] == "ringing"
+        # §17 B: group — join-модель, комната открыта сразу active (без ринга)
+        assert r.json()["status"] == "active"
+        assert set(r.json()["participant_ids"]) == {actors.alice.id}
 
         # bob и carol присоединяются без ринга каждому
         actors.act_as("bob")
@@ -321,6 +323,38 @@ async def test_cleanup_stale_ringing(db: AsyncSession, actors: Actors) -> None:
         r2 = await c.get(f"/api/v1/chats/{chat_id}/messages")
         kinds = [m["payload"].get("kind") for m in r2.json() if m["type"] == "system"]
         assert "call_missed" in kinds
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_kill_open_group_room(db: AsyncSession, actors: Actors) -> None:
+    """§17 B: group-звонок создаётся сразу active — ringing-TTL его не трогает
+    (комната открыта и ждёт join'ов сколько нужно)."""
+    from datetime import UTC, datetime
+
+    chat_id = await make_group(actors)
+
+    actors.act_as("alice")
+    async with await ac() as c:
+        r = await c.post("/api/v1/calls", json={"chat_id": chat_id, "kind": "audio"})
+        assert r.status_code == 201, r.text
+        call_id = r.json()["id"]
+        assert r.json()["status"] == "active"
+
+    #cleanup с любым «возрастом» звонка — active без ИНИЦИАТОРА-участника...
+    closed = await call_service.cleanup_stale_calls(db)
+    assert closed == 0
+    refreshed = await db.get(call_service.Call, call_id)
+    assert refreshed is not None
+    # ...но если инициатор больше не в комнате — она закрывается (§17: последний вышел → ended)
+    part = await db.get(call_service.CallParticipant, (call_id, actors.alice.id))
+    assert part is not None
+    part.left_at = datetime.now(UTC)
+    await db.commit()
+    closed = await call_service.cleanup_stale_calls(db)
+    assert closed == 1
+    refreshed = await db.get(call_service.Call, call_id)
+    assert refreshed is not None
+    assert refreshed.status == "ended"
 
 
 # --- Токены ---

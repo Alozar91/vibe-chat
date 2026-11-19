@@ -23,6 +23,7 @@ interface CallsState {
   error: string | null
   handleWsEvent: (e: WsEvent) => void
   start: (chatId: string) => Promise<void>
+  join: (callId: string) => Promise<void>
   accept: () => Promise<void>
   reject: () => Promise<void>
   cancel: () => Promise<void>
@@ -45,6 +46,8 @@ export const useCallsStore = create<CallsState>((set, get) => ({
     if (!call) return
     const st = get()
 
+    // §17 B: group-звонок — join-модель, ринга нет. Чужой активный звонок
+    // в группе: показываем как «баннер в комнате» (current), join — по кнопке
     if (e.type === 'call.ring') {
       // свой ринг-эхо (REST уже установил current) — просто обновляем
       if (st.current?.id === call.id) {
@@ -55,6 +58,18 @@ export const useCallsStore = create<CallsState>((set, get) => ({
       if (st.current) return // уже в звонке — чужой ринг игнорируем
       set({ current: call })
       syncRingtone()
+      return
+    }
+
+    if (e.type === 'call.joined') {
+      // я уже в этом звонке (REST установил current) — обновить состав
+      if (st.current?.id === call.id) {
+        set({ current: call })
+        return
+      }
+      // чужой group-звонок: показать панель «идёт звонок» (ring-оверлея нет)
+      if (st.current) return
+      set({ current: call })
       return
     }
 
@@ -80,6 +95,24 @@ export const useCallsStore = create<CallsState>((set, get) => ({
       await connectMedia()
     } catch (err) {
       set({ current: null, error: errMessage(err) })
+    }
+  },
+
+  join: async (callId) => {
+    // §17 B: current может быть уже установлен баннером чужого group-звонка —
+    // блокируем только join *другого* звонка
+    const cur = get().current
+    if (cur && cur.id !== callId) {
+      set({ error: 'уже в звонке' })
+      return
+    }
+    set({ error: null })
+    try {
+      const call = await callsApi.join(callId)
+      set({ current: call })
+      await connectMedia()
+    } catch (err) {
+      set({ error: errMessage(err) })
     }
   },
 
