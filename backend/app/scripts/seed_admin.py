@@ -54,14 +54,20 @@ async def _find_kc_user_id(username: str) -> str | None:
 
 
 async def _ensure_kc_user(username: str, password: str) -> str:
-    """KC id пользователя: создаёт; 409 (уже есть с прошлого раза) → ищет id."""
+    """KC id пользователя: создаёт; 409 (уже есть) → ищет id и ПЕРЕЗАПИСЫВАЕТ пароль.
+
+    Перезапись обязательна: admin мог остаться от импорта realm (dev-удобство)
+    или от недоведённого прошлого seed — источник пароля в любом случае
+    SEED_ADMIN_PASSWORD из окружения, а не то, что лежит в KC.
+    """
     try:
         return await get_kc_admin().create_user(username=username, password=password)
     except Exception as exc:  # noqa: BLE001 — скрипт: любой сбой → диагностика
         found = await _find_kc_user_id(username)
         if found is None:
             raise SystemExit(f"KC: не удалось создать пользователя: {exc}") from exc
-        print("KC-пользователь уже существует — переиспользую")
+        print("KC-пользователь уже существует — переиспользую, пароль перезаписываю")
+        await get_kc_admin().set_password(kc_user_id=found, password=password)
         return found
 
 
