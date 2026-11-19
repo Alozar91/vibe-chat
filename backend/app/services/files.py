@@ -121,12 +121,21 @@ def head_object(storage_key: str) -> dict[str, Any]:
 
 
 def read_object_prefix(storage_key: str, length: int = 64 * 1024) -> bytes:
-    """Первые байты объекта — для mime-sniffing и thumbnail при complete (§8).
+    """Первые байты объекта — для mime-sniffing (§8)."""
+    return _read_object(storage_key, length)
 
-    Для изображений до 64 КБ хватает целиком; бо́льшие читаются Pillow по Range
-    частично — упрощение MVP: читаем prefix, если изображение больше — thumbnail
-    деградирует (None), файл остаётся file-attachment.
+
+def read_object_full(storage_key: str, max_bytes: int = 50 * 1024 * 1024) -> bytes:
+    """Объект целиком (до max_bytes) — для thumbnail при complete (§8).
+
+    Pillow не умеет декодировать truncated JPEG (префикс 64 КБ): img.load()
+    падает на больших фото. Для thumbnails читаем файл целиком — фото больше
+    max_bytes деградируют (thumbnail None), оставаясь file-attachment.
     """
+    return _read_object(storage_key, max_bytes)
+
+
+def _read_object(storage_key: str, length: int) -> bytes:
     client = _s3_client()
     try:
         response = client.get_object(
@@ -205,8 +214,9 @@ def make_thumbnail_and_blurhash(file_row: File, data: bytes) -> tuple[str, str] 
         img = Image.open(io.BytesIO(data))
         img.load()
     except Exception:
-        # битое изображение: файл остаётся file-attachment, не image (безопасный fallback)
-        file_row.real_mime_type = "application/octet-stream"
+        # битое/недочитанное изображение: thumbnail нет, но real_mime НЕ трогаем —
+        # sniffing уже определил его корректно (раньше здесь перезаписывали на
+        # octet-stream и большие JPEG теряли превью + ломали kind=image, 422)
         return None
 
     rgb = img if img.mode == "RGB" else img.convert("RGB")

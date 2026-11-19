@@ -217,13 +217,14 @@ async def complete_upload(file_id: str, me: UserDep, db: DbDep) -> FileOut:
     if real_size != file_row.size_bytes:
         file_row.size_bytes = real_size
     content_type = str(head.get("ContentType", "")) or file_row.mime_type
-    # sniffing требует данных; для MVP читаем первые байты через get_object (Range) —
-    # упрощение: если Silo недоступен, complete вернёт 502
+    # sniffing требует только первые байты (Range); для thumbnail изображение
+    # читается целиком — Pillow не декодирует truncated JPEG (§8)
     data = file_service.read_object_prefix(file_row.storage_key)
     real_mime = file_service.sniff_mime(data, content_type)
     file_row.real_mime_type = real_mime
     file_row.status = "ready"
-    thumb = file_service.make_thumbnail_and_blurhash(file_row, data)
+    thumb_data = file_service.read_object_full(file_row.storage_key)
+    thumb = file_service.make_thumbnail_and_blurhash(file_row, thumb_data)
     if thumb is not None:
         file_row.thumb_key, file_row.blurhash = thumb
     await db.commit()
