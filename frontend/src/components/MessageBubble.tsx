@@ -3,6 +3,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { Forward, MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { Lightbox } from '@/components/Lightbox'
 import { messagesApi } from '@/api/client'
 import type { Message, User } from '@/api/types'
 import { EMOJI, EMOJI_ORDER, fmtDateTime, userLabel } from '@/lib/format'
@@ -34,6 +35,8 @@ export function MessageBubble({
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [reactbarOpen, setReactbarOpen] = useState(false)
+  // лайтбокс: индекс открытой картинки (null = закрыт)
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null)
 
   const react = useMutation({
     mutationFn: (emoji: string) => messagesApi.react(m.id, emoji),
@@ -109,13 +112,19 @@ export function MessageBubble({
             {images.length > 0 && (
               <div className={`mb-1 grid gap-1 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 {images.map((a, i) => (
-                  <a key={a.url ?? i} href={a.url} target="_blank" rel="noreferrer">
+                  <button
+                    key={a.url ?? i}
+                    type="button"
+                    title="Открыть фото"
+                    onClick={() => setLightboxAt(i)}
+                    className="cursor-zoom-in"
+                  >
                     <img
                       src={a.thumb_url ?? a.url}
                       alt={a.name ?? ''}
                       className="max-h-64 w-full rounded-lg object-cover"
                     />
-                  </a>
+                  </button>
                 ))}
               </div>
             )}
@@ -225,6 +234,16 @@ export function MessageBubble({
           </div>
         )}
       </div>
+
+      {/* Лайтбокс: полноэкранный просмотр оригиналов (§8) */}
+      {lightboxAt !== null && images.length > 0 && (
+        <Lightbox
+          images={images.map((a) => ({ url: a.url, name: a.name }))}
+          index={Math.min(lightboxAt, images.length - 1)}
+          onClose={() => setLightboxAt(null)}
+          onNavigate={setLightboxAt}
+        />
+      )}
     </div>
   )
 }
