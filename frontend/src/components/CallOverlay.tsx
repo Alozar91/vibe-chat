@@ -289,38 +289,17 @@ export function CallOverlay() {
     </>
   )
 
-  if (isVideo) {
-    /* Видео: полноэкранный оверлей с плитками (§17 C) */
+  // ринг (direct): карточка «Ответить/Отклонить» — для аудио и видео (этап C);
+  // полноэкранный видео-оверлей — только после accept (иначе он перекрывает
+  // ринг-карточку у получателя и звонок невозможно принять)
+  if (isRinging) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+      <>
         {error && (
-          <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
+          <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
             {error}
           </div>
         )}
-        <div className="flex items-center gap-3 px-4 py-3 text-white">
-          <span className={`size-2.5 rounded-full ${media === 'connected' ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
-          <span className="text-sm font-medium">{peerLabel}</span>
-          {isGroup && <span className="text-xs text-white/60">{call.participant_ids.length} уч.</span>}
-          <span className="text-xs text-white/60">{media === 'connected' ? fmtDuration(duration) : 'подключение…'}</span>
-        </div>
-        <div className="min-h-0 flex-1 px-4">
-          {media === 'connected' ? <VideoGrid /> : <div className="flex h-full items-center justify-center text-white/70">Подключение к медиа-серверу…</div>}
-        </div>
-        <div className="flex items-center justify-center gap-4 py-4">{controls(true)}</div>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      {error && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
-          {error}
-        </div>
-      )}
-      {isRinging ? (
-        /* Ринг: карточка по центру (только direct — §17 B) */
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-80 rounded-2xl border border-border bg-panel p-6 text-center shadow-2xl">
             <div className="mx-auto mb-3 flex size-16 items-center justify-center rounded-full bg-accent text-xl font-semibold text-white">
@@ -328,7 +307,7 @@ export function CallOverlay() {
             </div>
             <div className="text-sm font-semibold">{peerLabel}</div>
             <div className="mt-1 text-xs text-muted">
-              {isInitiator ? 'Вызов…' : 'Входящий звонок'}
+              {isInitiator ? (isVideo ? 'Видеовызов…' : 'Вызов…') : isVideo ? 'Входящий видеозвонок' : 'Входящий звонок'}
             </div>
             <div className="mt-5 flex justify-center gap-6">
               {isInitiator ? (
@@ -360,24 +339,56 @@ export function CallOverlay() {
             </div>
           </div>
         </div>
-      ) : (
-        /* Активный аудио-звонок: панель (direct — compact; group — с составом) */
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-full border border-border bg-panel px-4 py-2 shadow-xl">
-          <span className="flex size-2.5 items-center justify-center">
-            <span className={`size-2.5 rounded-full ${media === 'connected' ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
-          </span>
+      </>
+    )
+  }
+
+  if (isVideo) {
+    /* Видео (после accept): полноэкранный оверлей с плитками (§17 C) */
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+        {error && (
+          <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
+            {error}
+          </div>
+        )}
+        <div className="flex items-center gap-3 px-4 py-3 text-white">
+          <span className={`size-2.5 rounded-full ${media === 'connected' ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
           <span className="text-sm font-medium">{peerLabel}</span>
-          {isGroup && (
-            <span className="max-w-[240px] truncate text-xs text-muted" title={call.participant_ids.map((id) => memberLabels.get(id) ?? id).join(', ')}>
-              {call.participant_ids.length} уч.: {call.participant_ids.map((id) => memberLabels.get(id) ?? id).join(', ')}
-            </span>
-          )}
-          <span className="text-xs text-muted">
-            {media === 'connected' ? fmtDuration(duration) : 'подключение…'}
-          </span>
-          {controls(false)}
+          {isGroup && <span className="text-xs text-white/60">{call.participant_ids.length} уч.</span>}
+          <span className="text-xs text-white/60">{media === 'connected' ? fmtDuration(duration) : 'подключение…'}</span>
+        </div>
+        <div className="min-h-0 flex-1 px-4">
+          {media === 'connected' ? <VideoGrid /> : <div className="flex h-full items-center justify-center text-white/70">Подключение к медиа-серверу…</div>}
+        </div>
+        <div className="flex items-center justify-center gap-4 py-4">{controls(true)}</div>
+      </div>
+    )
+  }
+
+  /* Активный аудио-звонок: панель (direct — compact; group — с составом) */
+  return (
+    <>
+      {error && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
+          {error}
         </div>
       )}
+      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-full border border-border bg-panel px-4 py-2 shadow-xl">
+        <span className="flex size-2.5 items-center justify-center">
+          <span className={`size-2.5 rounded-full ${media === 'connected' ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
+        </span>
+        <span className="text-sm font-medium">{peerLabel}</span>
+        {isGroup && (
+          <span className="max-w-[240px] truncate text-xs text-muted" title={call.participant_ids.map((id) => memberLabels.get(id) ?? id).join(', ')}>
+            {call.participant_ids.length} уч.: {call.participant_ids.map((id) => memberLabels.get(id) ?? id).join(', ')}
+          </span>
+        )}
+        <span className="text-xs text-muted">
+          {media === 'connected' ? fmtDuration(duration) : 'подключение…'}
+        </span>
+        {controls(false)}
+      </div>
     </>
   )
 }
