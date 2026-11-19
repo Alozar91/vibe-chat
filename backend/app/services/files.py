@@ -25,11 +25,11 @@ _IMAGE_MIMES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 _THUMB_SIZE = (320, 320)
 
 
-def _s3_client() -> Any:
+def _s3_client(endpoint_url: str | None = None) -> Any:
     settings = get_settings()
     return boto3.client(
         "s3",
-        endpoint_url=settings.silo_internal_url,
+        endpoint_url=endpoint_url or settings.silo_internal_url,
         aws_access_key_id=settings.silo_access_key,
         aws_secret_access_key=settings.silo_secret_key,
         config=BotoConfig(signature_version="s3v4"),
@@ -37,9 +37,24 @@ def _s3_client() -> Any:
     )
 
 
-def _public_host() -> str:
-    """Host, зашиваемый в presigned URL (входит в подпись, §13)."""
-    return get_settings().silo_public_url
+def _presign_client() -> Any:
+    """Клиент для presign: подписываем НА ПУБЛИЧНОМ endpoint (§13).
+
+    Host и путь входят в подпись S3v4: подпись на internal-endpoint с последующей
+    подменой host'а строкой НЕ работает (Silo видит другой Host → 403
+    SignatureDoesNotMatch). SILO_PUBLIC_URL должен быть scheme://host[:port]
+    БЕЗ пути — nginx отдаёт Silo по /vibe-files/ без срезания префикса.
+    """
+    settings = get_settings()
+    public = settings.silo_public_url
+    internal = settings.silo_internal_url
+    # защита от старых конфигов с путём в SILO_PUBLIC_URL (напр. .../silo):
+    # путь в подписи не совпадёт с тем, что получит Silo
+    if public != internal and ("/" in public.split("://", 1)[1]):
+        raise RuntimeError(
+            "SILO_PUBLIC_URL must be scheme://host[:port] without a path"
+        )
+    return _s3_client(public)
 
 
 def new_file_id() -> str:
@@ -57,20 +72,14 @@ def thumb_storage_key(file_id: str) -> str:
 def presign_put(storage_key: str, size: int, mime: str, ttl_seconds: int) -> str:
     """Presigned PUT на публичном host (входит в подпись, §13): браузер кладёт файл
     напрямую в Silo по публичному адресу — как и читает по presigned GET."""
-    client = _s3_client()
     params: dict[str, Any] = {
         "Bucket": get_settings().silo_bucket,
         "Key": storage_key,
         "ContentLength": size,
         "ContentType": mime,
     }
-    url: str = client.generate_presigned_url("put_object", Params=params, ExpiresIn=ttl_seconds)
-    url = str(url)
-    internal = get_settings().silo_internal_url
-    public = _public_host()
-    if internal != public:
-        url = url.replace(internal, public, 1)
-    return url
+    url: str = _presign_client().generate_presigned_url("put_object", Params=params, ExpiresIn=ttl_seconds)
+    return str(url)
 
 
 def presign_get_url(storage_key: str, *, ttl_seconds: int, download_name: str | None = None) -> str:
@@ -78,16 +87,10 @@ def presign_get_url(storage_key: str, *, ttl_seconds: int, download_name: str | 
     params: dict[str, str] = {"Bucket": get_settings().silo_bucket, "Key": storage_key}
     if download_name is not None:
         params["ResponseContentDisposition"] = f'attachment; filename="{download_name}"'
-    client = _s3_client()
-    # подписываем на публичный host: подменяем endpoint на SILO_PUBLIC_URL,
-    # чтобы подпись совпала с тем, по чему ходит клиент (§13)
-    internal = get_settings().silo_internal_url
-    public = _public_host()
-    url = client.generate_presigned_url("get_object", Params=params, ExpiresIn=ttl_seconds)
-    url = str(url)
-    if internal != public:
-        url = url.replace(internal, public, 1)
-    return url
+    # подписываем на публичном endpoint — host/путь в подписи совпадают с тем,
+    # по чему ходит клиент (§13)
+    url = _presign_client().generate_presigned_url("get_object", Params=params, ExpiresIn=ttl_seconds)
+    return str(url)
 
 
 def ensure_bucket() -> None:

@@ -7,7 +7,7 @@
 #
 # Порты vibe-chat на хосте (все 127.0.0.1, кроме LiveKit):
 #   8090 frontend-nginx | 8002 backend (debug; 8001 занят kb-api) | 8081 Keycloak
-#   9002 Silo S3 API (presigned /silo/) | 9003 Silo-консоль | 7881+UDP LiveKit
+#   9002 Silo S3 API (presigned /vibe-files/) | 9003 Silo-консоль | 7881+UDP LiveKit
 # Порты vibe-know (при деплое): 8082 nginx | 8001 api | 8080 KC | 5432/6379/9090…
 #
 # Запуск: docker compose -f deploy/docker-compose.server.yml --env-file deploy/server.env up -d --build
@@ -36,7 +36,8 @@ services:
       APP_VALKEY_URL: valkey://valkey:6379/0
       APP_SILO_INTERNAL_URL: http://silo:9000
       # presigned URLs идут через системный nginx (Host входит в подпись, §8)
-      APP_SILO_PUBLIC_URL: https://${VIBE_DOMAIN}/silo
+      # БЕЗ пути: host входит в подпись presigned URL; системный nginx отдаёт Silo по /vibe-files/
+  APP_SILO_PUBLIC_URL: https://${VIBE_DOMAIN}
       APP_SILO_ACCESS_KEY: ${SILO_ROOT_USER:-vibe}
       APP_SILO_SECRET_KEY: ${SILO_ROOT_PASSWORD:-vibe-secret}
       APP_SILO_BUCKET: vibe-files
@@ -95,14 +96,14 @@ services:
     environment:
       MINIO_ROOT_USER: ${SILO_ROOT_USER:-vibe}
       MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD:-vibe-secret}
-      # CORS: presigned PUT — same-origin через системный nginx (/silo/ → silo:9000),
+      # CORS: presigned PUT - same-origin через системный nginx (/vibe-files/ → silo:9000),
       # но разрешим и localhost:5173 на всякий случай для dev-сценариев
       MINIO_API_CORS_ALLOW_ORIGIN: https://${VIBE_DOMAIN}
     command: server /data --console-address ":9001"
     expose:
       - "9000"
     ports:
-      - "127.0.0.1:9002:9000"   # S3 API — системный nginx → /silo/ (presigned)
+      - "127.0.0.1:9002:9000"   # S3 API - системный nginx → /vibe-files/ (presigned)
       - "127.0.0.1:9003:9001"   # консоль — только с localhost
     volumes:
       - silodata:/data

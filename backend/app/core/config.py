@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # Silo (S3-совместимое хранилище)
     silo_internal_url: str = "http://localhost:9000"
+    # Публичный адрес для presigned URL (входит в подпись S3, §13):
+    # scheme://host[:port] БЕЗ пути — системный nginx отдаёт Silo по /vibe-files/
     silo_public_url: str = "http://localhost:9000"
     silo_access_key: str = ""
     silo_secret_key: str = ""
