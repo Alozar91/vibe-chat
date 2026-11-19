@@ -232,7 +232,9 @@ def make_thumbnail_and_blurhash(file_row: File, data: bytes) -> tuple[str, str] 
         Body=buffer.getvalue(),
         ContentType="image/jpeg",
     )
-    hashed = blurhash_lib.encode(np.asarray(rgb), 4, 3)
+    # blurhash — по уменьшенной копии, не по полному изображению: encode сложность
+    # O(w*h), на фото 12+ МП работает десятки секунд (504 на complete, 2026-11-19)
+    hashed = blurhash_lib.encode(np.asarray(thumb), 4, 3)
     return key, str(hashed)
 
 
