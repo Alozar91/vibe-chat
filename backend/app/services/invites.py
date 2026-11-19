@@ -146,7 +146,8 @@ def _validate_registration(*, username: str, password: str, email: str | None) -
 async def register(
     db: AsyncSession,
     *,
-    invite_code: str,
+    invite_code: str | None,
+    open_registration: bool,
     username: str,
     password: str,
     first_name: str | None,
@@ -161,16 +162,24 @@ async def register(
     username+password. Порядок (§5): проверка кода → username → KC → атомарное
     потребление кода + локальный пользователь (одна транзакция); при проигрыше
     гонки — компенсирующее удаление KC-аккаунта.
+
+    Код опционален: без кода — открытая регистрация, разрешённая только при
+    open_registration=True (env APP_OPEN_REGISTRATION, §5); иначе 422.
     """
     # 1. Валидация входа
     _validate_registration(username=username, password=password, email=email)
     display = display_name or username
 
-    # 2. Код существует и жив (предварительно; финально — атомарно)
-    invite = await db.scalar(select(Invite).where(Invite.code_hash == hash_invite_code(invite_code)))
-    if invite is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "invite not found")
-    _check_invite_usable(invite)
+    # 2. Код существует и жив (предварительно; финально — атомарно).
+    # Код не передан: открытая регистрация разрешена только флагом (§5)
+    invite: Invite | None = None
+    if invite_code:
+        invite = await db.scalar(select(Invite).where(Invite.code_hash == hash_invite_code(invite_code)))
+        if invite is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "invite not found")
+        _check_invite_usable(invite)
+    elif not open_registration:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invite code required")
 
     # 3. Username не занят в системе (люди и боты в одной таблице, §6)
     if await db.scalar(select(User.id).where(User.username == username)) is not None:
@@ -183,20 +192,22 @@ async def register(
         # 4. KC-аккаунт: только username+password (§5)
         kc_user_id = await kc_admin.create_user(username=username, password=password)
 
-        # 5. Атомарное потребление кода: conditional UPDATE — проигравший гонку откатится
-        stmt = (
-            update(Invite)
-            .where(
-                Invite.id == invite.id,
-                Invite.deactivated_at.is_(None),
-                (Invite.max_uses.is_(None)) | (Invite.uses_count < Invite.max_uses),
+        # 5. Атомарное потребление кода (только если передан): conditional UPDATE —
+        # проигравший гонку откатится
+        if invite is not None:
+            stmt = (
+                update(Invite)
+                .where(
+                    Invite.id == invite.id,
+                    Invite.deactivated_at.is_(None),
+                    (Invite.max_uses.is_(None)) | (Invite.uses_count < Invite.max_uses),
+                )
+                .values(uses_count=Invite.uses_count + 1)
             )
-            .values(uses_count=Invite.uses_count + 1)
-        )
-        result = await db.execute(stmt)
-        consumed = getattr(result, "rowcount", 0)
-        if not consumed:
-            raise HTTPException(status.HTTP_410_GONE, "invite exhausted")
+            result = await db.execute(stmt)
+            consumed = getattr(result, "rowcount", 0)
+            if not consumed:
+                raise HTTPException(status.HTTP_410_GONE, "invite exhausted")
 
         # 6. Локальный пользователь (та же транзакция): персональные данные здесь (§5)
         user = User(

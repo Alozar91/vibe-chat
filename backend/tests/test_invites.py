@@ -9,6 +9,7 @@ from typing import Annotated, Any
 import pytest
 from app.api.deps import current_user
 from app.core import valkey as valkey_core
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -286,6 +287,63 @@ async def test_register_unknown_code_404(db: AsyncSession, actors: Actors) -> No
     async with await ac() as c:
         r = await _register(c, "vh_nonexistent", "someuser")
         assert r.status_code == 404
+
+
+# --- Открытая регистрация (§5, feature/register): код опционален по флагу ---
+
+
+@pytest.mark.asyncio
+async def test_register_open_registration_without_code(db: AsyncSession, actors: Actors, monkeypatch: pytest.MonkeyPatch) -> None:
+    """APP_OPEN_REGISTRATION=true: без кода — 201, KC-аккаунт + пользователь."""
+    monkeypatch.setattr(get_settings(), "open_registration", True)
+    actors_kc = actors.kc
+    async with await ac() as c:
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={"username": "openuser", "password": "s3cret-pass"},
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["username"] == "openuser"
+
+    assert len(actors_kc.created) == 1  # KC-аккаунт создан без всякого кода
+    user = (await db.execute(select(User).where(User.username == "openuser"))).scalar_one()
+    assert user.is_platform_admin is False
+
+
+@pytest.mark.asyncio
+async def test_register_no_code_requires_flag(db: AsyncSession, actors: Actors, monkeypatch: pytest.MonkeyPatch) -> None:
+    """APP_OPEN_REGISTRATION=false (default): без кода — 422, пользователь не создан."""
+    monkeypatch.setattr(get_settings(), "open_registration", False)
+    async with await ac() as c:
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={"username": "nocode", "password": "s3cret-pass"},
+        )
+        assert r.status_code == 422
+
+        # код по-прежнему работает при выключенном флаге
+        actors.act_as("admin")
+        r_invite = await c.post("/api/v1/invites", json={"max_uses": None})
+        code = r_invite.json()["code"]
+        assert (await _register(c, code, "withcode")).status_code == 201
+
+    users = (await db.execute(select(User.username).where(User.username.in_(["nocode", "withcode"])))).scalars().all()
+    assert users == ["withcode"]
+
+
+@pytest.mark.asyncio
+async def test_register_with_code_when_open_mode(db: AsyncSession, actors: Actors, monkeypatch: pytest.MonkeyPatch) -> None:
+    """В открытом режиме переданный код всё равно проверяется и потребляется (§5)."""
+    monkeypatch.setattr(get_settings(), "open_registration", True)
+    actors.act_as("admin")
+    async with await ac() as c:
+        r = await c.post("/api/v1/invites", json={"max_uses": 1})
+        code = r.json()["code"]
+        assert (await _register(c, code, "coded")).status_code == 201
+
+        # код исчерпан: и открытый режим не спасает переданный мёртвый код
+        r2 = await _register(c, code, "other")
+        assert r2.status_code == 410
 
 
 @pytest.mark.asyncio

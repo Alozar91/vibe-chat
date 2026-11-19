@@ -50,6 +50,8 @@ services:
       # путь под /chat: системный nginx → frontend-nginx (/chat/livekit/ → livekit:7880)
       APP_LIVEKIT_WS_URL: wss://${VIBE_DOMAIN}/chat/livekit
       APP_CALL_RING_TIMEOUT_SECONDS: 45
+      # открытая регистрация без инвайт-кода (§5); false = только по кодам
+      APP_OPEN_REGISTRATION: ${APP_OPEN_REGISTRATION:-false}
       # seed платформенного админа (python -m app.scripts.seed_admin, §13)
       SEED_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
     healthcheck:

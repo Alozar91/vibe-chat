@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Сообщения
     edit_window_hours: int = 24  # окно редактирования (§6)
 
+    # Регистрация (§5): открытый режим — POST /auth/register без инвайт-кода.
+    # Default false: инвайт-режим (коды платформенного админа) сохраняется;
+    # включается на конкретной площадке env'ом (APP_OPEN_REGISTRATION=true)
+    open_registration: bool = False
+
     # Звонки (LiveKit, §17): пустой api_key/secret — звонки выключены (503 на /calls/token)
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
