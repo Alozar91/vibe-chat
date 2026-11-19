@@ -1,8 +1,9 @@
-/** Страница логина: redirect на KC (§5) и авто-переход в приложение после входа.
+/** Страница входа (§5): выбор «Войти» (OIDC redirect на KC) / «Зарегистрироваться».
  *
- * Callback (?code=…) обрабатывает AuthProvider (react-oidc-context, авто-режим);
- * здесь только ждём его и по готовности сразу navigate('/', replace) —
- * без промежуточных кнопок («Войти в мессенджер» убрано, 2026-11-19).
+ * Без автозапуска signinRedirect: мгновенный редирект на KC делал
+ * регистрацию недостижимой (на KC-форме регистрации нет —
+ * registrationAllowed: false). Callback (?code=…) обрабатывает AuthProvider
+ * сам; по готовности сессии — сразу navigate('/') без промежуточных экранов.
  */
 
 import { useEffect } from 'react'
@@ -13,20 +14,23 @@ import { MessageSquare } from 'lucide-react'
 export function LoginPage() {
   const auth = useAuth()
   const navigate = useNavigate()
-  // callback в URL живёт до завершения обработки (oidc-client-ts чистит историю сам)
   const isCallback = window.location.search.includes('code=')
 
   useEffect(() => {
     if (auth.isLoading) return
-    if (auth.isAuthenticated) {
-      navigate('/', { replace: true })
-      return
-    }
-    if (isCallback || auth.error) return // AuthProvider завершает callback сам; при ошибке не зацикливаемся
-    void auth.signinRedirect()
-  }, [auth, isCallback, navigate])
+    if (auth.isAuthenticated) navigate('/', { replace: true })
+  }, [auth, navigate])
 
-  if (auth.isLoading || (isCallback && !auth.isAuthenticated)) {
+  if (auth.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-muted">Загрузка…</div>
+      </div>
+    )
+  }
+
+  if (isCallback && !auth.isAuthenticated && !auth.error) {
+    // AuthProvider завершает callback сам — ждём
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-muted">Вход…</div>
@@ -34,38 +38,31 @@ export function LoginPage() {
     )
   }
 
-  if (auth.error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4">
-        <MessageSquare className="size-12 text-accent" />
-        <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">Ошибка входа: {auth.error.message}</div>
-        <button
-          onClick={() => void auth.signinRedirect()}
-          className="rounded-lg bg-accent px-6 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-        >
-          Повторить
-        </button>
-        <Link to="/register" className="text-sm text-muted hover:text-text">
-          Нет аккаунта? Зарегистрироваться
-        </Link>
-      </div>
-    )
-  }
-
-  // не-authenticated без callback (signinRedirect уже запущен эффектом) — страховка
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4">
-      <MessageSquare className="size-12 text-accent" />
-      <div className="text-lg">Перенаправление на страницу входа…</div>
-      <button
-        onClick={() => void auth.signinRedirect()}
-        className="rounded-lg bg-accent px-6 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-      >
-        Войти
-      </button>
-      <Link to="/register" className="text-sm text-muted hover:text-text">
-        Нет аккаунта? Зарегистрироваться
-      </Link>
+    <div className="flex h-full items-center justify-center">
+      <div className="w-[360px] rounded-xl border border-border bg-panel p-8">
+        <div className="mb-6 flex flex-col items-center gap-2">
+          <MessageSquare className="size-10 text-accent" />
+          <h1 className="text-lg font-semibold">Vibe Chat</h1>
+        </div>
+        {auth.error && (
+          <div className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">Ошибка входа: {auth.error.message}</div>
+        )}
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => void auth.signinRedirect()}
+            className="rounded-lg bg-accent py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          >
+            Войти
+          </button>
+          <Link
+            to="/register"
+            className="rounded-lg border border-border py-2 text-center text-sm text-muted hover:border-accent hover:text-text"
+          >
+            Зарегистрироваться
+          </Link>
+        </div>
+      </div>
     </div>
   )
 }
