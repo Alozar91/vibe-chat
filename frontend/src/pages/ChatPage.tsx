@@ -8,6 +8,7 @@ import { chatsApi, messagesApi, uploadFile, usersApi } from '@/api/client'
 import type { Message } from '@/api/types'
 import { ForwardDialog } from '@/components/ForwardDialog'
 import { GroupInfoDialog } from '@/components/GroupInfoDialog'
+import { Lightbox } from '@/components/Lightbox'
 import { MessageBubble } from '@/components/MessageBubble'
 import { useCallsStore } from '@/realtime/calls'
 import { useWsStore } from '@/realtime/ws'
@@ -179,6 +180,20 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, sorted.length])
 
+  // Лайтбокс (§8): все картинки ленты по порядку сообщений; клик по фото открывает
+  // оригинал, стрелки листают ВСЕ фото чата, лента превью внизу
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null)
+  const feedImages = useMemo(() => {
+    const imgs: { url: string; thumbUrl?: string; name?: string | null }[] = []
+    for (const msg of sorted) {
+      if (msg.deleted_at) continue
+      for (const a of msg.attachments) {
+        if (a.kind === 'image') imgs.push({ url: a.url, thumbUrl: a.thumb_url ?? undefined, name: a.name })
+      }
+    }
+    return imgs
+  }, [sorted])
+
   if (!chatId) {
     return (
       <div className="flex h-full flex-1 items-center justify-center text-muted">
@@ -241,6 +256,22 @@ export function ChatPage() {
     send.mutate({ text: t })
     setText('')
     setReplyTo(null)
+  }
+
+  /** Клик по картинке в пузыре: вычисляем её индекс в общем списке ленты. */
+  const openImage = (messageId: string, imageIndex: number) => {
+    let count = 0
+    for (const msg of sorted) {
+      if (msg.deleted_at) continue
+      for (const a of msg.attachments) {
+        if (a.kind !== 'image') continue
+        if (msg.id === messageId && count + imageIndex < feedImages.length) {
+          setLightboxAt(count + imageIndex)
+          return
+        }
+        count += 1
+      }
+    }
   }
 
   return (
@@ -318,6 +349,7 @@ export function ChatPage() {
                 setForwarding(m)
                 setReplyTo(null)
               }}
+              onOpenImage={openImage}
             />
           ))
         )}
@@ -432,6 +464,16 @@ export function ChatPage() {
       )}
       {forwarding && meId && (
         <ForwardDialog message={forwarding} meId={meId} onClose={() => setForwarding(null)} />
+      )}
+
+      {/* Лайтбокс: просмотр фото всего чата (§8) */}
+      {lightboxAt !== null && feedImages.length > 0 && (
+        <Lightbox
+          images={feedImages}
+          index={Math.min(lightboxAt, feedImages.length - 1)}
+          onClose={() => setLightboxAt(null)}
+          onNavigate={setLightboxAt}
+        />
       )}
     </div>
   )

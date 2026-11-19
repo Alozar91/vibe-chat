@@ -60,6 +60,7 @@ function renderBubble(msg: Message) {
         onReply={() => {}}
         onEdit={() => {}}
         onForward={() => {}}
+        onOpenImage={() => {}}
       />
     </QueryClientProvider>,
   )

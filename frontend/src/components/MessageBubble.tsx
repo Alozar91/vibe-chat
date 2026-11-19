@@ -3,7 +3,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { Forward, MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { Lightbox } from '@/components/Lightbox'
 import { messagesApi } from '@/api/client'
 import type { Message, User } from '@/api/types'
 import { EMOJI, EMOJI_ORDER, fmtDateTime, userLabel } from '@/lib/format'
@@ -19,6 +18,8 @@ interface Props {
   onReply: () => void
   onEdit: () => void
   onForward: () => void
+  /** Клик по картинке: (message_id, индекс картинки в сообщении) — лайтбокс на уровне ленты. */
+  onOpenImage: (messageId: string, imageIndex: number) => void
 }
 
 export function MessageBubble({
@@ -32,11 +33,10 @@ export function MessageBubble({
   onReply,
   onEdit,
   onForward,
+  onOpenImage,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [reactbarOpen, setReactbarOpen] = useState(false)
-  // лайтбокс: индекс открытой картинки (null = закрыт)
-  const [lightboxAt, setLightboxAt] = useState<number | null>(null)
 
   const react = useMutation({
     mutationFn: (emoji: string) => messagesApi.react(m.id, emoji),
@@ -116,7 +116,7 @@ export function MessageBubble({
                     key={a.url ?? i}
                     type="button"
                     title="Открыть фото"
-                    onClick={() => setLightboxAt(i)}
+                    onClick={() => onOpenImage(m.id, i)}
                     className="cursor-zoom-in"
                   >
                     <img
@@ -234,16 +234,6 @@ export function MessageBubble({
           </div>
         )}
       </div>
-
-      {/* Лайтбокс: полноэкранный просмотр оригиналов (§8) */}
-      {lightboxAt !== null && images.length > 0 && (
-        <Lightbox
-          images={images.map((a) => ({ url: a.url, name: a.name }))}
-          index={Math.min(lightboxAt, images.length - 1)}
-          onClose={() => setLightboxAt(null)}
-          onNavigate={setLightboxAt}
-        />
-      )}
     </div>
   )
 }
