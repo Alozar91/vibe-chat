@@ -64,15 +64,17 @@ interface PendingAttachment {
   file: File
   status: 'uploading' | 'ready' | 'error'
   fileId?: string
+  /** kind по real_mime от сервера (§8) — после успешной загрузки. */
+  kind?: 'image' | 'video' | 'file'
 }
 
 const MAX_ATTACHMENTS = 10 // §16 лимиты
 
-/** Прикидка kind на клиенте: точную сверку с real_mime делает бэкенд (§7). */
-function attachmentKind(f: File): 'image' | 'video' | 'file' {
-  if (f.type === 'image/svg+xml') return 'file' // SVG — не image (§8)
-  if (f.type.startsWith('image/')) return 'image'
-  if (f.type.startsWith('video/')) return 'video'
+/** Прикидка kind на клиенте до ответа сервера; после complete — real_mime (§8). */
+function attachmentKind(realMime: string): 'image' | 'video' | 'file' {
+  if (realMime === 'image/svg+xml') return 'file' // SVG — не image (§8)
+  if (realMime.startsWith('image/')) return 'image'
+  if (realMime.startsWith('video/')) return 'video'
   return 'file'
 }
 
@@ -115,7 +117,7 @@ export function ChatPage() {
       // kind сверяется бэкендом с real_mime (§7); здесь — прикидка по mime файла
       const attachments = pending
         .filter((p) => p.status === 'ready' && p.fileId)
-        .map((p) => ({ file_id: p.fileId!, kind: attachmentKind(p.file), file_name: p.file.name }))
+        .map((p) => ({ file_id: p.fileId!, kind: p.kind ?? attachmentKind(p.file.type || 'application/octet-stream'), file_name: p.file.name }))
       return messagesApi.send(
         chatId!,
         {
@@ -210,7 +212,9 @@ export function ChatPage() {
       setPending(list => list.concat({ id, file: f, status: 'uploading' }))
       uploadFile(f)
         .then((uploaded) => {
-          setPending((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'ready', fileId: uploaded.file_id } : p)))
+          setPending((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, status: 'ready', fileId: uploaded.file_id, kind: attachmentKind(uploaded.real_mime) } : p)),
+          )
         })
         .catch(() => {
           setPending((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'error' } : p)))
@@ -356,7 +360,7 @@ export function ChatPage() {
                 key={p.id}
                 className="flex items-center gap-2 rounded-lg border border-border bg-panel-2 px-2.5 py-1.5 text-xs"
               >
-                <span>{p.status === 'error' ? '⚠️' : attachmentKind(p.file) === 'image' ? '🖼️' : '📎'}</span>
+                <span>{p.status === 'error' ? '⚠️' : (p.kind ?? attachmentKind(p.file.type || '')) === 'image' ? '🖼️' : '📎'}</span>
                 <span className="max-w-40 truncate">{p.file.name}</span>
                 <span className="text-muted">
                   {p.status === 'uploading' ? 'загрузка…' : p.status === 'error' ? 'ошибка' : 'готово'}

@@ -156,7 +156,7 @@ export async function sha256Hex(data: ArrayBuffer): Promise<string> {
 }
 
 /** Полный upload-флоу §8: upload-url → PUT в Silo → complete → ready file_id. */
-export async function uploadFile(file: File): Promise<{ file_id: string; mime: string }> {
+export async function uploadFile(file: File): Promise<{ file_id: string; real_mime: string }> {
   const buf = await file.arrayBuffer()
   const sha256 = await sha256Hex(buf)
   // браузер не всегда определяет mime (зависит от ОС) — бэкенд всё равно
@@ -169,8 +169,10 @@ export async function uploadFile(file: File): Promise<{ file_id: string; mime: s
     headers: { 'Content-Type': mime },
   })
   if (!res.ok) throw new ApiError(res.status, `Silo upload failed: ${res.status}`)
-  await filesApi.complete(file_id)
-  return { file_id, mime }
+  const uploaded = await filesApi.complete(file_id)
+  // real_mime от сервера — источник истины для kind вложения: файл может не быть
+  // тем, что заявлено расширением (напр. HEIC под .jpg) — тогда это file, не image
+  return { file_id, real_mime: uploaded.real_mime_type ?? mime }
 }
 
 // --- Messages ---
