@@ -1,7 +1,7 @@
 /** Лента чата: сообщения, реакции, цитирование, typing, отправка (§7, §9). */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Paperclip, Phone, Send, Settings2, X } from 'lucide-react'
+import { Paperclip, Phone, Send, Settings2, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { chatsApi, messagesApi, uploadFile, usersApi } from '@/api/client'
@@ -265,7 +265,15 @@ export function ChatPage() {
             <Settings2 className="size-5" />
           </button>
         )}
-        {/* Кнопка звонка (§17): direct — ringing-модель, group — join-модель (этап B) */}
+        {/* Кнопки звонка (§17): 📞 аудио (A/B), 🎥 видео (этап C) — direct и group */}
+        <button
+          title={chatDetails.data?.type === 'group' ? 'Видеозвонок в группе' : 'Видеозвонок'}
+          disabled={!!activeCall}
+          onClick={() => void callStart(chatId, 'video')}
+          className={`${canManageGroup ? '' : 'ml-auto'} rounded p-2 text-muted hover:bg-panel-2 hover:text-foreground disabled:opacity-40`}
+        >
+          <Video className="size-5" />
+        </button>
         <button
           title={chatDetails.data?.type === 'group' ? 'Открыть звонок в группе' : 'Позвонить'}
           disabled={!!activeCall}

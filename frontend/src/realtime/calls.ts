@@ -20,15 +20,22 @@ interface CallsState {
   /** identity удалённых участников LiveKit = user_id (§17). */
   remoteIds: string[]
   muted: boolean
+  /** Видео (этап C): камера включена; счётчик изменений треков для перерисовки плиток. */
+  camOn: boolean
+  screenOn: boolean
+  /** инкрементится при subscribe/unsubscribe/enable/disable видео-треков */
+  videoVersion: number
   error: string | null
   handleWsEvent: (e: WsEvent) => void
-  start: (chatId: string) => Promise<void>
+  start: (chatId: string, kind?: 'audio' | 'video') => Promise<void>
   join: (callId: string) => Promise<void>
   accept: () => Promise<void>
   reject: () => Promise<void>
   cancel: () => Promise<void>
   leave: () => Promise<void>
   toggleMute: () => Promise<void>
+  toggleCam: () => Promise<void>
+  toggleScreen: () => Promise<void>
   clear: () => void
 }
 
@@ -38,6 +45,9 @@ export const useCallsStore = create<CallsState>((set, get) => ({
   media: 'idle',
   remoteIds: [],
   muted: false,
+  camOn: false,
+  screenOn: false,
+  videoVersion: 0,
   error: null,
 
   handleWsEvent: (e) => {
@@ -83,14 +93,14 @@ export const useCallsStore = create<CallsState>((set, get) => ({
     syncRingtone()
   },
 
-  start: async (chatId) => {
+  start: async (chatId, kind = 'audio') => {
     if (get().current) {
       set({ error: 'уже в звонке' })
       return
     }
     set({ error: null })
     try {
-      const call = await callsApi.start(chatId)
+      const call = await callsApi.start(chatId, kind)
       set({ current: call })
       await connectMedia()
     } catch (err) {
@@ -171,11 +181,32 @@ export const useCallsStore = create<CallsState>((set, get) => ({
     set({ muted: next })
   },
 
+  toggleCam: async () => {
+    const room = get().room
+    if (!room) return
+    const next = !get().camOn
+    await room.localParticipant.setCameraEnabled(next)
+    set({ camOn: next, videoVersion: get().videoVersion + 1 })
+  },
+
+  toggleScreen: async () => {
+    const room = get().room
+    if (!room) return
+    const next = !get().screenOn
+    try {
+      await room.localParticipant.setScreenShareEnabled(next)
+      set({ screenOn: next, videoVersion: get().videoVersion + 1 })
+    } catch {
+      // пользователь отказал в доступе к экрану / не поддерживается
+      set({ error: 'шаринг экрана недоступен' })
+    }
+  },
+
   clear: () => {
     stopRingtone()
     const room = get().room
     if (room) room.disconnect()
-    set({ current: null, room: null, media: 'idle', remoteIds: [], muted: false, error: null })
+    set({ current: null, room: null, media: 'idle', remoteIds: [], muted: false, camOn: false, screenOn: false, videoVersion: 0, error: null })
   },
 }))
 
@@ -209,6 +240,17 @@ async function connectMedia(): Promise<void> {
     lkRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
       track.detach()
     })
+    // видео (этап C): любое изменение видео-треков (включая mute/unmute камеры
+    // участниками) → перерисовка плиток
+    const bumpVideo = () => {
+      if (useCallsStore.getState().room === lkRoom) {
+        useCallsStore.setState({ videoVersion: useCallsStore.getState().videoVersion + 1 })
+      }
+    }
+    lkRoom.on(RoomEvent.TrackMuted, bumpVideo)
+    lkRoom.on(RoomEvent.TrackUnmuted, bumpVideo)
+    lkRoom.on(RoomEvent.TrackPublished, bumpVideo)
+    lkRoom.on(RoomEvent.TrackUnpublished, bumpVideo)
     lkRoom.on(RoomEvent.Disconnected, () => {
       if (useCallsStore.getState().room === lkRoom) {
         useCallsStore.setState({ media: 'idle', remoteIds: [] })
@@ -216,10 +258,21 @@ async function connectMedia(): Promise<void> {
     })
     await lkRoom.connect(ws_url, token)
     await lkRoom.localParticipant.setMicrophoneEnabled(true)
+    const camWanted = useCallsStore.getState().current?.kind === 'video'
+    let camOn = false
+    if (camWanted) {
+      try {
+        await lkRoom.localParticipant.setCameraEnabled(true)
+        camOn = true
+      } catch {
+        useCallsStore.setState({ error: 'камера недоступна — только звук' })
+      }
+    }
     useCallsStore.setState({
       room: lkRoom,
       media: 'connected',
       remoteIds: Array.from(lkRoom.remoteParticipants.keys()),
+      camOn,
     })
   } catch {
     // сигналинг-звонок жив; медиа недоступно (например, LiveKit не запущен)
