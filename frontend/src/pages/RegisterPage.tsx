@@ -8,7 +8,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { MessageSquare } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { registerWithInvite } from '@/api/client'
 import { signinResourceOwner } from '@/auth/oidc'
 
@@ -24,7 +24,6 @@ export function RegisterPage() {
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [autoLoginFailed, setAutoLoginFailed] = useState(false)
-  const navigate = useNavigate()
 
   const register = useMutation({
     mutationFn: () =>
@@ -37,10 +36,14 @@ export function RegisterPage() {
         email: email.trim() || undefined,
         display_name: displayName.trim() || undefined,
       }),
-    // автовход: ROPC с только что введёнными credentials (пароль уходит только в KC)
+    // автовход: ROPC с только что введёнными credentials (пароль уходит только в KC).
+    // Полная перезагрузка, а не navigate(): AuthProvider видит пользователя только
+    // при инициализации — SPA-переход попадал в AuthGate без сессии и выкидывал
+    // на /login (набл. 2026-11-19)
     onSuccess: async () => {
       if (await signinResourceOwner(username.trim(), password)) {
-        navigate('/', { replace: true })
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+        window.location.assign(base + '/')
       } else {
         setAutoLoginFailed(true) // fallback: обычный вход через Keycloak
       }
