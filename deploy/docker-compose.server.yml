@@ -37,7 +37,7 @@ services:
       APP_SILO_INTERNAL_URL: http://silo:9000
       # presigned URLs идут через системный nginx (Host входит в подпись, §8)
       # БЕЗ пути: host входит в подпись presigned URL; системный nginx отдаёт Silo по /vibe-files/
-  APP_SILO_PUBLIC_URL: https://${VIBE_DOMAIN}
+      APP_SILO_PUBLIC_URL: https://${VIBE_DOMAIN}
       APP_SILO_ACCESS_KEY: ${SILO_ROOT_USER:-vibe}
       APP_SILO_SECRET_KEY: ${SILO_ROOT_PASSWORD:-vibe-secret}
       APP_SILO_BUCKET: vibe-files
@@ -114,6 +114,9 @@ services:
     # при --import-realm (KC 26: плейсхолдеры без префикса env.)
     command: start-dev --import-realm
     environment:
+      # JVM-тюнинг (A.3): ограничиваем heap KC (по умолчанию JVM берёт 25% RAM
+      # хоста), значение переопределяется в server.env через KC_JAVA_OPTS_APPEND
+      JAVA_OPTS_APPEND: ${KC_JAVA_OPTS_APPEND:--Xms256m -Xmx512m}
       KC_HOSTNAME: https://${VIBE_DOMAIN}:8444
       KC_HOSTNAME_STRICT: "false"
       KC_PROXY_HEADERS: xforwarded
@@ -121,6 +124,9 @@ services:
       VIBE_PUBLIC_URL: https://${VIBE_DOMAIN}/chat
       # webOrigins — origin БЕЗ пути (CORS токен-запросов SPA → KC:8444)
       VIBE_PUBLIC_ORIGIN: https://${VIBE_DOMAIN}
+      # frontendUrl realm'а = issuer токенов; бэкенд валидирует iss по
+      # APP_KEYCLOAK_URL (https://домен:8444) — значения должны совпадать
+      VIBE_KC_FRONTEND_URL: https://${VIBE_DOMAIN}:8444
       KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
       KC_HEALTH_ENABLED: "true"
@@ -148,6 +154,7 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
       - "7881:7881"
+      - "127.0.0.1:6789:6789"   # prometheus-метрики (только localhost; стресс-тест/мониторинг)
       # 100 портов достаточно для MVP-стенда (~25-50 одновременных звонков);
       # полный диапазон 50000-60000 не даёт преимуществ, а docker-proxy на
       # каждый опубликованный UDP-порт (userland) съедает ГБ памяти (набл. 2026-11-18).

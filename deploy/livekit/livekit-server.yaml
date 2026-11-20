@@ -15,3 +15,8 @@ rtc:
   port_range_start: 50000
   port_range_end: 50100
   use_external_ip: true
+# Prometheus-метрики для стресс-тестов/мониторинга: только localhost
+# (в compose пробрасывается 127.0.0.1:6789), наружу не публикуется.
+# Ключевые серии: livekit_participant_total, livekit_track_total,
+# livekit_packet_loss*, livekit_retransmitted_bytes_*
+prometheus_port: 6789
