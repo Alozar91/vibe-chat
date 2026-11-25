@@ -160,7 +160,7 @@ export function CallOverlay() {
             isInitiator={call.initiator_id === myId}
             isVideo={isVideo}
             error={error}
-            accept={() => void accept()}
+            accept={(withVideo) => void accept(withVideo ?? true)}
             reject={() => void reject()}
             cancel={() => void cancel()}
           />
@@ -210,7 +210,7 @@ function RingCard(props: {
   isInitiator: boolean;
   isVideo: boolean;
   error: string | null;
-  accept: () => void;
+  accept: (withVideo: boolean) => void;
   reject: () => void;
   cancel: () => void;
 }) {
@@ -236,12 +236,18 @@ function RingCard(props: {
               <Pressable style={[styles.circleBtn, styles.danger]} onPress={props.reject}>
                 <Text style={styles.circleBtnText}>✕</Text>
               </Pressable>
-              <Pressable style={[styles.circleBtn, styles.ok]} onPress={props.accept}>
+              <Pressable style={[styles.circleBtn, styles.ok]} onPress={() => props.accept(true)}>
                 <Text style={styles.circleBtnText}>📞</Text>
               </Pressable>
             </>
           )}
         </View>
+        {/* видео-звонок: альтернативный ответ только со звуком (этап 10) */}
+        {props.isVideo && !props.isInitiator ? (
+          <Pressable style={styles.acceptNoVideoBtn} onPress={() => props.accept(false)}>
+            <Text style={styles.acceptNoVideoText}>{t("call.acceptNoVideo")}</Text>
+          </Pressable>
+        ) : null}
       </View>
       {props.error ? (
         <View style={styles.errorToastInline} pointerEvents="none">
@@ -567,6 +573,15 @@ const styles = StyleSheet.create({
   circleBtnText: { color: "#fff", fontSize: 22 },
   danger: { backgroundColor: theme.colors.danger },
   ok: { backgroundColor: theme.colors.accentGreen },
+  acceptNoVideoBtn: {
+    marginTop: theme.spacing.md,
+    paddingVertical: theme.spacing.xs + 2,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.radius.full,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  acceptNoVideoText: { color: theme.colors.textSecondary, fontSize: theme.font.sm },
   groupBanner: {
     position: "absolute",
     left: theme.spacing.lg,

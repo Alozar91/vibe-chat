@@ -115,6 +115,7 @@ export const ru = {
   "call.join": "Присоединиться",
   "call.answer": "Ответить",
   "call.decline": "Отклонить",
+  "call.acceptNoVideo": "Ответить без видео",
   "call.cancel": "Отменить",
   "call.hangup": "Завершить",
   "call.leave": "Выйти из звонка",

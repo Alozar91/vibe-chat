@@ -37,7 +37,7 @@ interface CallsState {
   handleWsEvent: (type: string, data: unknown) => void;
   start: (chatId: string, kind?: "audio" | "video") => Promise<void>;
   join: (callId: string) => Promise<void>;
-  accept: () => Promise<void>;
+  accept: (withVideo?: boolean) => Promise<void>;
   reject: () => Promise<void>;
   cancel: () => Promise<void>;
   leave: () => Promise<void>;
@@ -153,17 +153,18 @@ export const useCalls = create<CallsState>((set, get) => ({
     }
   },
 
-  accept: async () => {
+  accept: async (withVideo = true) => {
     const call = get().current;
     if (!call) return;
     setErrorState(null);
     try {
       await ensureMicPermission();
-      if (call.kind === "video" && !(await ensureCamPermission())) setErrorState("err_cam_denied");
+      // «ответить без видео» — камера не запрашивается и не публикуется
+      if (call.kind === "video" && withVideo && !(await ensureCamPermission())) setErrorState("err_cam_denied");
       const updated = await callsApi.accept(call.id);
       set({ current: updated });
       syncRing();
-      await connectMedia();
+      await connectMedia(withVideo);
     } catch (err) {
       setErrorState(errMessage(err));
     }
@@ -216,6 +217,11 @@ export const useCalls = create<CallsState>((set, get) => ({
     const next = !get().camOn;
     try {
       if (next) {
+        // включение камеры требует разрешения (после «ответа без видео» его ещё нет)
+        if (!(await ensureCamPermission())) {
+          setErrorState("err_cam_denied");
+          return;
+        }
         // RN-специфика (этап 10): mute глушит капчер и unmute его не возрождает
         // (сервер навсегда видит muted) — камеру включаем пересозданием трека
         const lp = room.localParticipant;
@@ -316,7 +322,7 @@ async function ensureCamPermission(): Promise<boolean> {
 
 // --- LiveKit-подключение (медиа, §17) ---
 
-async function connectMedia(): Promise<void> {
+async function connectMedia(withVideo = true): Promise<void> {
   const { current, room } = useCalls.getState();
   if (!current || room) return; // уже подключены (инициатор подключается на start)
   useCalls.setState({ media: "connecting" });
@@ -376,10 +382,11 @@ async function connectMedia(): Promise<void> {
     await lkRoom.connect(url, token);
     await lkRoom.localParticipant.setMicrophoneEnabled(true);
 
-    // видео-звонок (этап 10): камера сразу; отказ — fallback «только звук»
+    // видео-звонок (этап 10): камера сразу; отказ — fallback «только звук»;
+    // ответ без видео — камера не включается (можно включить кнопкой)
     let camOn = false;
     let localCam: VideoTrack | null = null;
-    if (current.kind === "video") {
+    if (current.kind === "video" && withVideo) {
       try {
         await lkRoom.localParticipant.setCameraEnabled(true);
         camOn = true;
