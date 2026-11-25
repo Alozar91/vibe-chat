@@ -16,8 +16,11 @@
    (applicationId; другое имя → FCM не свяжется с приложением)
 3. App nickname: `vibe-chat-android`; SHA-1/SHA-256 — **пропустить** (не нужен для FCM без App Check)
 4. **Register app** → скачать **`google-services.json`**
-5. Положить файл в `mobile/google-services.json` (в git НЕ коммитить — там project id/ключи;
-   коммитим `mobile/google-services.json.example`-заглушку, см. ниже)
+5. Положить файл в `mobile/google-services.json` И копию в `mobile/android/app/google-services.json`
+   (gradle-плагин `com.google.gms.google-services` читает именно android/app/). В git НЕ коммитить —
+   там project id/ключи; коммитим `mobile/google-services.json.example`-заглушку, см. ниже)
+   Примечание: `android/` коммитится (bare workflow), но `google-services.json` по-прежнему
+   игнорируется и на новой машине копируется вручную из корня.
 
 ## 3. Проверка
 
