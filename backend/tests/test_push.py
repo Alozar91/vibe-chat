@@ -1,5 +1,6 @@
 """Тесты пушей (Docs/android.md §3.8, этап 6): токены, fanout, агрегация, version."""
 
+import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -268,6 +269,9 @@ async def test_aggregation_counts_after_cursor(
 
     assert len(gw.sent) == 1
     assert gw.sent[0]["data"]["count"] == "3"
+    # склейка (решение 2026-11-25): body — «N новых сообщений», lines — список последних
+    assert gw.sent[0]["data"]["body"] == "3 новых сообщения"
+    assert json.loads(gw.sent[0]["data"]["lines"]) == ["раз", "два", "три"]
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ import messaging, {
 import { Platform } from "react-native";
 import notifee, {
   AndroidImportance,
+  AndroidStyle,
   AuthorizationStatus,
   EventType,
 } from "@notifee/react-native";
@@ -119,24 +120,48 @@ function chatTitle(chatId: string): string {
 
 // ── Показ уведомления (background/quit; foreground — глушим, §3.5) ─────────
 
+/** Показ уведомления (background/quit; payload содержит контент — §3.8).
+ *
+ * title/body приходят готовыми от бэкенда («от кого и что», при склейке —
+ * «N новых сообщений»); lines — до 5 последних сообщений для InboxStyle.
+ */
 export async function showMessageNotification(
   message: FirebaseMessagingTypes.RemoteMessage,
 ): Promise<void> {
   const chatId = asString(message.data?.chat_id);
   if (!chatId || chatId === activeChatId) return;
   const count = message.data?.count ? Number(message.data.count) : 1;
-  const title = chatTitle(chatId);
-  const body = count > 1 ? `${count} новых сообщения` : "Новое сообщение";
+  const title = asString(message.data?.title) || chatTitle(chatId);
+  const body = asString(message.data?.body) ?? (count > 1 ? `${count} новых сообщений` : "Новое сообщение");
+
+  const android: {
+    channelId: string;
+    smallIcon: string;
+    pressAction: { id: string };
+    style?: { type: AndroidStyle.INBOX; lines: string[]; summary?: string };
+  } = {
+    channelId: CHANNEL_ID,
+    smallIcon: "ic_launcher",
+    pressAction: { id: "default" },
+  };
+  const linesRaw = asString(message.data?.lines);
+  if (count > 1 && linesRaw) {
+    try {
+      const lines = JSON.parse(linesRaw) as unknown;
+      if (Array.isArray(lines) && lines.length && lines.every((l) => typeof l === "string")) {
+        android.style = { type: AndroidStyle.INBOX, lines, summary: body };
+      }
+    } catch {
+      // битый JSON — показываем без раскладки
+    }
+  }
+
   await notifee.displayNotification({
     id: `chat-${chatId}`, // один notification на чат: повторный пуш обновляет
     title,
     body,
     data: { chat_id: chatId },
-    android: {
-      channelId: CHANNEL_ID,
-      smallIcon: "ic_launcher",
-      pressAction: { id: "default" },
-    },
+    android,
   });
 }
 
