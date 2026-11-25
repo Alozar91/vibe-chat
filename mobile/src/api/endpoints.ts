@@ -11,6 +11,8 @@ import type {
   ChatDetail,
   FileOut,
   Message,
+  ChatMember,
+  MemberRole,
   ReactionGroup,
   User,
 } from "./types";
@@ -36,6 +38,20 @@ export const chatsApi = {
   /** Выход из группы: удаление себя = remove_member себя (leave разрешён, §12). */
   leave: (chatId: string, meId: string) =>
     apiClient.delete<void>(`/chats/${chatId}/members/${meId}`),
+  /** Добавление участников (admin/owner; уже состоящие пропускаются — идемпотентно, §12). */
+  addMembers: (chatId: string, memberIds: string[]) =>
+    apiClient.post<void>(`/chats/${chatId}/members`, { member_ids: memberIds }),
+  /** Исключение участника (admin/owner; владельца исключить нельзя, §12). */
+  removeMember: (chatId: string, userId: string) =>
+    apiClient.delete<void>(`/chats/${chatId}/members/${userId}`),
+  /** Смена роли участника member↔admin (owner, этап 12). */
+  setRole: (chatId: string, userId: string, role: MemberRole) =>
+    apiClient.patch<ChatMember>(`/chats/${chatId}/members/${userId}`, { role }),
+  /** Передача владения (owner; body {user_id} — новый owner). */
+  transferOwner: (chatId: string, userId: string) =>
+    apiClient.post<void>(`/chats/${chatId}/owner`, { user_id: userId }),
+  /** Удаление чата (owner only; soft delete — исчезает из списков у всех). */
+  deleteChat: (chatId: string) => apiClient.delete<void>(`/chats/${chatId}`),
 };
 
 export interface MessageListParams {

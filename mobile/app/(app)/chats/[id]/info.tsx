@@ -1,23 +1,48 @@
 /**
- * Инфо о чате (§12): участники + роли; для групп — переименование (owner/admin)
- * и выход из чата (leave = remove_member себя). Для direct — только состав.
+ * Инфо о чате (§12): участники + роли; управление — как в вебе (GroupInfoDialog):
+ * переименование (owner/admin), добавление участников поиском (admin/owner,
+ * идемпотентно), исключение (admin — member'ов; owner — кроме owner), смена роли
+ * member↔admin (owner), передача владения (owner), удаление чата (owner),
+ * выход из чата (leave = remove_member себя). Для direct — только состав.
  */
 
 import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { chatsApi } from "../../../../src/api/endpoints";
+import { chatsApi, usersApi } from "../../../../src/api/endpoints";
 import { queryKeys } from "../../../../src/api/query-keys";
 import { useSession } from "../../../../src/stores/session";
+import { useDebounced } from "../../../../src/hooks/use-debounced";
 import { t } from "../../../../src/i18n/ru";
 import { theme, useThemedStyles } from "../../../../src/theme";
 import type { ChatMember, MemberRole } from "../../../../src/api/types";
 
-function MemberRow({ member, meId }: { member: ChatMember; meId: string | null }) {
+function MemberRow({
+  member,
+  meId,
+  isOwner,
+  isAdmin,
+  onRemove,
+  onRoleChange,
+  onTransfer,
+}: {
+  member: ChatMember;
+  meId: string | null;
+  isOwner: boolean;
+  isAdmin: boolean;
+  onRemove: (m: ChatMember) => void;
+  onRoleChange: (m: ChatMember, role: MemberRole) => void;
+  onTransfer: (m: ChatMember) => void;
+}) {
   const styles = useStyles();
   const roleLabel = t(`info.role.${member.role}` as const);
+  // Полномочия над участником — как в вебе (canModerate): owner — над всеми кроме
+  // себя; admin — только над member. Owner'a не трогает никто.
+  const moddable =
+    member.role !== "owner" && member.user_id !== meId && (isOwner || (isAdmin && member.role === "member"));
+  const roleMutable = isOwner && member.user_id !== meId && member.role !== "owner";
   return (
     <View style={styles.row}>
       <View style={styles.avatar}>
@@ -30,7 +55,47 @@ function MemberRow({ member, meId }: { member: ChatMember; meId: string | null }
         </Text>
         <Text style={styles.rowSubtitle}>@{member.user.username}</Text>
       </View>
-      <Text style={styles.role}>{roleLabel}</Text>
+      <View style={styles.rowActions}>
+        {member.role === "owner" ? <Text style={styles.crown}>👑</Text> : null}
+        <Text style={styles.role}>{roleLabel}</Text>
+        {roleMutable ? (
+          <Pressable
+            style={styles.iconBtn}
+            accessibilityLabel={t("info.roleChange", { name: member.user.display_name })}
+            onPress={() =>
+              Alert.alert(t("info.roleChange", { name: member.user.display_name }), undefined, [
+                { text: t("common.cancel"), style: "cancel" },
+                {
+                  text: t("info.roleAdminOption"),
+                  onPress: () => onRoleChange(member, "admin"),
+                },
+                {
+                  text: t("info.roleMemberOption"),
+                  onPress: () => onRoleChange(member, "member"),
+                },
+              ])
+            }
+          >
+            <Text style={styles.iconText}>🛡</Text>
+          </Pressable>
+        ) : null}
+        {moddable ? (
+          <>
+            <Pressable
+              style={styles.iconBtn}
+              accessibilityLabel={t("info.removeConfirm", { name: member.user.display_name })}
+              onPress={() => onRemove(member)}
+            >
+              <Text style={[styles.iconText, styles.dangerText]}>✕</Text>
+            </Pressable>
+            {isOwner ? (
+              <Pressable style={styles.iconBtn} accessibilityLabel={t("info.transfer")} onPress={() => onTransfer(member)}>
+                <Text style={styles.iconText}>👑</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -46,8 +111,21 @@ export default function ChatInfoScreen() {
   });
   const [title, setTitle] = useState<string | null>(null);
 
+  // Добавление участников: инлайн-блок поиска (как в вебе) — admin/owner
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebounced(query.trim(), 400);
+  const users = useQuery({
+    queryKey: queryKeys.users.search(debouncedQuery),
+    queryFn: () => usersApi.search(debouncedQuery),
+    enabled: adding && debouncedQuery.length >= 2,
+    staleTime: 10_000,
+  });
+
   const myRole = detail.data?.members.find((m) => m.user_id === meId)?.role;
-  const canManage = detail.data?.type === "group" && (myRole === "owner" || myRole === "admin");
+  const isOwner = myRole === "owner";
+  const isAdmin = myRole === "owner" || myRole === "admin";
+  const canManage = detail.data?.type === "group" && isAdmin;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.chats.all() });
@@ -58,6 +136,34 @@ export default function ChatInfoScreen() {
     onSuccess: () => {
       setTitle(null);
       invalidate();
+    },
+  });
+
+  const addMembers = useMutation({
+    mutationFn: (userId: string) => chatsApi.addMembers(chatId, [userId]),
+    onSuccess: invalidate,
+  });
+
+  const removeMember = useMutation({
+    mutationFn: (userId: string) => chatsApi.removeMember(chatId, userId),
+    onSuccess: invalidate,
+  });
+
+  const setRole = useMutation({
+    mutationFn: (p: { userId: string; role: MemberRole }) => chatsApi.setRole(chatId, p.userId, p.role),
+    onSuccess: invalidate,
+  });
+
+  const transferOwner = useMutation({
+    mutationFn: (userId: string) => chatsApi.transferOwner(chatId, userId),
+    onSuccess: invalidate,
+  });
+
+  const deleteChat = useMutation({
+    mutationFn: () => chatsApi.deleteChat(chatId),
+    onSuccess: () => {
+      invalidate();
+      router.replace("/chats");
     },
   });
 
@@ -76,7 +182,36 @@ export default function ChatInfoScreen() {
     ]);
   };
 
+  const onRemove = (m: ChatMember) => {
+    Alert.alert(t("info.removeConfirm", { name: m.user.display_name }), undefined, [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("info.remove"), style: "destructive", onPress: () => removeMember.mutate(m.user_id) },
+    ]);
+  };
+
+  const onTransfer = (m: ChatMember) => {
+    Alert.alert(t("info.transferConfirm", { name: m.user.display_name }), undefined, [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("info.transfer"), onPress: () => transferOwner.mutate(m.user_id) },
+    ]);
+  };
+
+  const onDelete = () => {
+    Alert.alert(t("info.deleteConfirm"), undefined, [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("info.delete"), style: "destructive", onPress: () => deleteChat.mutate() },
+    ]);
+  };
+
+  // Кандидаты в участники: все найденные, кроме уже состоящих (боты разрешены — §12)
+  const existingIds = useMemo(() => new Set((detail.data?.members ?? []).map((m) => m.user_id)), [detail.data]);
+  const candidates = useMemo(
+    () => (users.data ?? []).filter((u) => !existingIds.has(u.id)),
+    [users.data, existingIds],
+  );
+
   const chat = detail.data;
+  const showFooter = chat?.type === "group";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -90,7 +225,17 @@ export default function ChatInfoScreen() {
       <FlatList
         data={chat?.members ?? []}
         keyExtractor={(m) => m.user_id}
-        renderItem={({ item }) => <MemberRow member={item} meId={meId} />}
+        renderItem={({ item }) => (
+          <MemberRow
+            member={item}
+            meId={meId}
+            isOwner={isOwner}
+            isAdmin={isAdmin}
+            onRemove={onRemove}
+            onRoleChange={(m, role) => setRole.mutate({ userId: m.user_id, role })}
+            onTransfer={onTransfer}
+          />
+        )}
         ListHeaderComponent={
           <>
             {chat?.type === "group" ? (
@@ -118,16 +263,76 @@ export default function ChatInfoScreen() {
             ) : (
               <Text style={styles.directHint}>{t("info.directHint")}</Text>
             )}
-            <Text style={styles.membersHeader}>
-              {t("info.members", { count: chat?.members.length ?? 0 })}
-            </Text>
+            <View style={styles.membersHeaderRow}>
+              <Text style={styles.membersHeader}>
+                {t("info.members", { count: chat?.members.length ?? 0 })}
+              </Text>
+              {canManage ? (
+                <Pressable
+                  style={styles.addBtn}
+                  onPress={() => {
+                    setQuery("");
+                    setAdding((v) => !v);
+                  }}
+                >
+                  <Text style={styles.addBtnText}>{t("info.add")}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {adding ? (
+              <View style={styles.addBlock}>
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder={t("info.searchPlaceholder")}
+                  placeholderTextColor={theme.colors.textSecondary}
+                />
+                {debouncedQuery.length >= 2
+                  ? candidates.map((u) => (
+                      <Pressable
+                        key={u.id}
+                        style={styles.candidateRow}
+                        disabled={addMembers.isPending}
+                        onPress={() => addMembers.mutate(u.id)}
+                      >
+                        <View style={styles.avatar}>
+                          <Text style={styles.avatarText}>{u.display_name.slice(0, 1).toUpperCase()}</Text>
+                        </View>
+                        <View style={styles.rowCenter}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>
+                            {u.display_name}
+                          </Text>
+                          <Text style={styles.rowSubtitle}>
+                            @{u.username}
+                            {u.is_bot ? ` · ${t("info.bot")}` : ""}
+                          </Text>
+                        </View>
+                        <Text style={styles.plus}>＋</Text>
+                      </Pressable>
+                    ))
+                  : null}
+                {debouncedQuery.length >= 2 && users.isSuccess && candidates.length === 0 ? (
+                  <Text style={styles.noUsers}>{t("info.noUsers")}</Text>
+                ) : null}
+              </View>
+            ) : null}
           </>
         }
         ListFooterComponent={
-          chat?.type === "group" && myRole !== "owner" ? (
-            <Pressable style={styles.leaveBtn} onPress={onLeave} disabled={leave.isPending}>
-              <Text style={styles.leaveText}>{t("info.leave")}</Text>
-            </Pressable>
+          showFooter ? (
+            <>
+              {isOwner ? (
+                <Pressable style={styles.deleteBtn} onPress={onDelete} disabled={deleteChat.isPending}>
+                  <Text style={styles.leaveText}>{t("info.deleteChat")}</Text>
+                </Pressable>
+              ) : null}
+              {myRole !== "owner" ? (
+                <Pressable style={styles.leaveBtn} onPress={onLeave} disabled={leave.isPending}>
+                  <Text style={styles.leaveText}>{t("info.leave")}</Text>
+                </Pressable>
+              ) : null}
+            </>
           ) : null
         }
         style={styles.list}
@@ -182,12 +387,51 @@ const useStyles = () => useThemedStyles(() => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  membersHeader: {
+  membersHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
     paddingBottom: theme.spacing.xs,
+  },
+  membersHeader: {
     fontSize: theme.font.sm,
     color: theme.colors.textSecondary,
+  },
+  addBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+  },
+  addBtnText: { fontSize: theme.font.sm, color: theme.colors.primary, fontWeight: "500" },
+  addBlock: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 8,
+    fontSize: theme.font.md,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.xs,
+  },
+  candidateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    paddingVertical: 8,
+  },
+  plus: { fontSize: 18, color: theme.colors.primary },
+  noUsers: {
+    fontSize: theme.font.sm,
+    color: theme.colors.textSecondary,
+    paddingVertical: theme.spacing.sm,
   },
   row: {
     flexDirection: "row",
@@ -208,14 +452,41 @@ const useStyles = () => useThemedStyles(() => StyleSheet.create({
   rowCenter: { flex: 1 },
   rowTitle: { fontSize: theme.font.md, color: theme.colors.text },
   rowSubtitle: { fontSize: theme.font.sm, color: theme.colors.textSecondary },
-  role: { fontSize: theme.font.sm, color: theme.colors.textSecondary },
+  rowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  role: { fontSize: theme.font.sm, color: theme.colors.textSecondary, marginRight: 2 },
+  crown: { fontSize: 13 },
+  iconBtn: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.radius.sm,
+  },
+  iconText: { fontSize: 15, color: theme.colors.textSecondary },
+  dangerText: { color: theme.colors.danger },
+  deleteBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.danger,
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 12,
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+  },
   leaveBtn: {
     borderWidth: 1,
     borderColor: theme.colors.danger,
     borderRadius: theme.radius.sm,
     alignItems: "center",
     paddingVertical: 12,
-    margin: theme.spacing.lg,
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.lg,
   },
   leaveText: { color: theme.colors.danger, fontSize: theme.font.md, fontWeight: "500" },
 }));

@@ -23,6 +23,8 @@ interface VersionGateResult {
   blocked: boolean;
   /** min_version с сервера (для текста на блокирующем экране). */
   min: string | null;
+  /** latest_version с сервера (для неблокирующего баннера «доступна новая версия»). */
+  latest: string | null;
 }
 
 function parseSemver(value: string): [number, number, number] {
@@ -41,19 +43,22 @@ export function isSemverBelow(a: string, b: string): boolean {
 }
 
 export async function fetchVersionGate(): Promise<VersionGateResult> {
+  const open: VersionGateResult = { blocked: false, min: null, latest: null };
   try {
-    console.log(`[app-version] own=${ownVersion}`);
     const res = await fetch(`${config.apiBase}/app/version`);
-    if (!res.ok) return { blocked: false, min: null };
-    const data = (await res.json()) as { min_version?: string };
-    const min = data.min_version;
+    if (!res.ok) return open;
+    const data = (await res.json()) as { min_version?: string; latest_version?: string };
+    const min = data.min_version ?? "";
+    const latest = data.latest_version ?? "";
     const blocked = !min ? false : isSemverBelow(ownVersion, min);
-    console.log(`[app-version] server_min=${min ?? ""} blocked=${blocked}`);
-    if (!min) return { blocked: false, min: null };
-    return { blocked, min };
+    return {
+      blocked,
+      min: min || null,
+      // баннер показываем только если последняя версия реально новее собственной
+      latest: latest && isSemverBelow(ownVersion, latest) ? latest : null,
+    };
   } catch {
     // сервер недоступен — fail-open (§3.8: блокируем только по явному min_version)
-    console.log("[app-version] fetch failed — fail-open");
-    return { blocked: false, min: null };
+    return open;
   }
 }
