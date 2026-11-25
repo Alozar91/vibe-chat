@@ -104,8 +104,6 @@ async def _push_user(db: AsyncSession, *, user_id: str, chat_id: str, message: M
     if not tokens:
         return
 
-    body = _body_of(message)
-    title = await _chat_title(db, chat_id)
     dead: list[str] = []
     for token_row in tokens:
         count = await _count_unpushed(
@@ -114,7 +112,7 @@ async def _push_user(db: AsyncSession, *, user_id: str, chat_id: str, message: M
         if count <= 0:
             continue  # после контрольной точки всё прочитано — пуш не нужен
         data = {"chat_id": chat_id, "message_id": message.id, "count": str(count)}
-        dead.extend(await push_gateway.send([token_row.token], title=title, body=body, data=data))
+        dead.extend(await push_gateway.send([token_row.token], data=data))
         await db.execute(
             update(DeviceToken)
             .where(DeviceToken.token == token_row.token)
@@ -123,14 +121,6 @@ async def _push_user(db: AsyncSession, *, user_id: str, chat_id: str, message: M
     await db.commit()
     if dead:
         await cleanup_dead_tokens(dead)
-
-
-def _body_of(message: Message) -> str:
-    """Тело пуша: текст сообщения или текст системного события; обрезка 120."""
-    from app.services.messages import SYSTEM_TEXTS
-
-    display = message.text or SYSTEM_TEXTS.get((message.payload or {}).get("kind", ""), "новое сообщение")
-    return display if len(display) <= 120 else display[:117] + "…"
 
 
 async def _count_unpushed(
@@ -160,10 +150,3 @@ async def _count_unpushed(
         conditions.append(Message.id > lower)
     stmt = select(Message.id).where(*conditions)
     return len((await db.execute(stmt)).all())
-
-
-async def _chat_title(db: AsyncSession, chat_id: str) -> str:
-    from app.models.chat import Chat
-
-    chat = await db.get(Chat, chat_id)
-    return chat.title if chat and chat.title else "Vibe Chat"

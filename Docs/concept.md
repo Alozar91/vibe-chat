@@ -501,14 +501,14 @@ Join-модель реализована end-to-end: `POST /calls` в **group**-
 ### Архитектура: свой FCM-шлюз, без firebase-admin
 
 - Транспорт — **FCM HTTP v1** напрямую (`https://fcm.googleapis.com/v1/projects/{project}/messages:send`): JWT RS256 (SA-ключ `APP_FCM_CREDENTIALS_FILE`, `deploy/secrets/firebase-sa.json` — не в git) → OAuth2-токен (кэш 55 мин) → POST. Зависимости — `pyjwt[crypto]` + `httpx` (уже в проекте), без тяжёлого `firebase-admin`.
-- Драйвер задаётся `APP_PUSH_DRIVER`: `off` (по умолчанию, пуши выключены) / `console` (эмуляция в лог — dev и тесты) / `fcm`. Единый интерфейс `send(tokens, title, body, data) → dead_tokens`; HTTP 400/404/410 от FCM = токен мёртв (`UNREGISTERED` после переустановки приложения) → авто-удаление из БД.
+- Драйвер задаётся `APP_PUSH_DRIVER`: `off` (по умолчанию, пуши выключены) / `console` (эмуляция в лог — dev и тесты) / `fcm`. Единый интерфейс `send(tokens, data) → dead_tokens`; HTTP 400/404/410 от FCM = токен мёртв (`UNREGISTERED` после переустановки приложения) → авто-удаление из БД.
 - Ошибки пуша **не ломают основной путь** отправки сообщения (try/except вокруг fanout, logger.exception).
 
 ### Триггер и логика (Docs/android.md §3.5, §3.8)
 
 - Пуш — **только на новые не-system сообщения**: хук в `publish_message_new` (realtime) — typing/presence/реакции/edit/delete не пушатся; системные сообщения — нет.
 - Получатель пропускается, если: он отправитель; у него **0 активных WS-соединений** нет (пуш не нужен — realtime доставил; presence-счётчик Valkey `presence:{user_id}`); нет device-токенов.
-- **Агрегация**: контрольная точка `last_pushed_message_id` на токен; `count` = сообщения чата после `max(контрольной точки, last_read_message_id участника)` — прочитанное на другом устройстве не считается; тело — текст последнего сообщения (обрезка 120), title — название чата (fallback «Vibe Chat»). Payload data — **только идентификаторы** (`chat_id`, `message_id`, `count`): текст клиент подтягивает сам (токены FCM чужого бэкенда не шифруются).
+- **Агрегация**: контрольная точка `last_pushed_message_id` на токен; `count` = сообщения чата после `max(контрольной точки, last_read_message_id участника)` — прочитанное на другом устройстве не считается. Payload data — **только идентификаторы** (`chat_id`, `message_id`, `count`): текст клиент подтягивает сам (токены FCM чужого бэкенда не шифруются); title/body строит клиент (name чата из кэша, fallback «Vibe Chat»). Сообщение — **data-only** (`notification`-часть не отправляется) + `android.priority=high`: notification-часть рисует системное уведомление без headless JS, а нам нужен клиентский рендер (агрегация, deep link); проверено e2e (этап 7).
 - Схема БД: таблица `device_tokens` (PK = токен, `user_id`, `platform`, `last_pushed_message_id`, `last_seen_at`); миграция `a3f9c2d81e47`.
 
 ### Версия клиента

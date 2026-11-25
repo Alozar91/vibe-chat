@@ -11,12 +11,21 @@ import { wsClient } from "../src/services/ws-client";
 import { useSession } from "../src/stores/session";
 import { useRealtime } from "../src/stores/realtime";
 import { handlePkceRedirect } from "../src/services/session-service";
+import { installPushHandlers } from "../src/services/push-service";
 
 const persister = createQueryPersister(storage);
 
 export default function RootLayout() {
   const authenticated = useSession((s) => s.authenticated);
   const syncRef = useRef(false);
+  const pushRef = useRef(false);
+
+  // Обработчики пушей (§3.5) — один раз: foreground/background/onOpenApp/холодный старт
+  useEffect(() => {
+    if (pushRef.current) return;
+    pushRef.current = true;
+    installPushHandlers();
+  }, []);
 
   // PKCE-fallback (§3.2): redirect vibechat://callback приходит deep link'ом.
   // openAuthSessionAsync обычно сам возвращает URL, но cold-start (процесс убит

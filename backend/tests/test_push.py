@@ -99,9 +99,9 @@ class FakeGateway:
         monkeypatch.setattr(push_gateway, "send", self._send)
         monkeypatch.setattr(push_gateway, "push_enabled", lambda: self.enabled)
 
-    async def _send(self, tokens: list[str], *, title: str, body: str, data: dict[str, str]) -> list[str]:
+    async def _send(self, tokens: list[str], *, data: dict[str, str]) -> list[str]:
         for t in tokens:
-            self.sent.append({"token": t, "title": title, "body": body, "data": data})
+            self.sent.append({"token": t, "data": data})
         return [t for t in tokens if t in self.dead]
 
 
@@ -218,7 +218,6 @@ async def test_push_sent_to_offline_member(
     assert len(gw.sent) == 1
     push = gw.sent[0]
     assert push["token"] == "tok-alice-1"
-    assert push["body"] == "привет"
     assert push["data"]["chat_id"] == direct_chat.id
     assert push["data"]["message_id"] == msg.id
     assert push["data"]["count"] == "1"
@@ -269,7 +268,6 @@ async def test_aggregation_counts_after_cursor(
 
     assert len(gw.sent) == 1
     assert gw.sent[0]["data"]["count"] == "3"
-    assert gw.sent[0]["body"] == "три"  # тело последнего сообщения
 
 
 @pytest.mark.asyncio

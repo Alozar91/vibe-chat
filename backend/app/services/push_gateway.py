@@ -5,8 +5,13 @@
   `push:log` (dev-инструменты могут читать), доставка не имитируется дальше;
 - `fcm` — Firebase Cloud Messaging HTTP v1 (SA-ключ из APP_FCM_CREDENTIALS_FILE).
 
-Транспорт однотипный: send(user_id, tokens, title, body, data) → список
+Транспорт однотипный: send(tokens, data) → список
 мёртвых токенов (UNREGISTERED/INVALID_ARGUMENT → удаляются владельцем).
+
+Payload — только data (§18: контент сообщения в FCM-шине не светится;
+title/body строит клиент). notification-часть не отправляется: она
+рисует системное уведомление, не поднимая headless JS, — а нам нужен
+клиентский рендер (агрегация, имя чата из кэша, deep link).
 
 Зависимости: pyjwt[crypto] (RSA-подпись JWT) + httpx — уже в pyproject;
 `google-auth` не нужен.
@@ -43,31 +48,23 @@ def push_enabled() -> bool:
     return bool(s.fcm_credentials_file)
 
 
-async def send(
-    tokens: list[str],
-    *,
-    title: str,
-    body: str,
-    data: dict[str, str],
-) -> list[str]:
+async def send(tokens: list[str], *, data: dict[str, str]) -> list[str]:
     """Отправка пуша на токены. Возвращает мёртвые токены (вызывающий удаляет их)."""
     if not tokens:
         return []
     if get_settings().push_driver == "fcm":
-        return await _send_fcm(tokens, title=title, body=body, data=data)
-    return _log_push(tokens, title=title, body=body, data=data)
+        return await _send_fcm(tokens, data=data)
+    return _log_push(tokens, data=data)
 
 
 # --- console-драйвер (эмуляция) ---
 
 
-def _log_push(tokens: list[str], *, title: str, body: str, data: dict[str, str]) -> list[str]:
+def _log_push(tokens: list[str], *, data: dict[str, str]) -> list[str]:
     for token in tokens:
         logger.info(
-            "PUSH (console) token=%s… title=%r body=%r data=%s",
+            "PUSH (console) token=%s… data=%s",
             token[:8],
-            title,
-            body,
             json.dumps(data, ensure_ascii=False),
         )
     return []  # эмуляция не имитирует отзыв токенов
@@ -112,9 +109,11 @@ async def _get_access_token() -> str:
     return _access_token
 
 
-async def _send_fcm(tokens: list[str], *, title: str, body: str, data: dict[str, str]) -> list[str]:
+async def _send_fcm(tokens: list[str], *, data: dict[str, str]) -> list[str]:
     """Отправка каждого токена отдельным запросом (агрегация уже сделана вызывающим).
 
+    Data-only + priority=high: notification-часть не отправляем — она рисует
+    системное уведомление без headless JS (клиент сам строит текст и deep link).
     Ошибки сети/квот — не фатальны (пуш не критичен; повтор — при следующем сообщении).
     """
     s = get_settings()
@@ -127,7 +126,6 @@ async def _send_fcm(tokens: list[str], *, title: str, body: str, data: dict[str,
             payload = {
                 "message": {
                     "token": reg_token,
-                    "notification": {"title": title, "body": body},
                     "data": data,
                     "android": {"priority": "high"},
                 }

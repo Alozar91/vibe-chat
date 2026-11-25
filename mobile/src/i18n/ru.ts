@@ -44,6 +44,9 @@ export const ru = {
   "profile.logout": "Выйти",
   "profile.logoutConfirm": "Выйти из аккаунта?",
   "profile.personalNote": "Персональные данные хранятся в системе; Keycloak знает только логин и пароль (§5).",
+  "profile.notifications": "Уведомления",
+  "profile.notificationsOn": "Включены — настройка канала в системе",
+  "profile.notificationsOff": "Отключены — включить в настройках системы",
 
   "forward.title": "Переслать сообщение",
   "forward.noChats": "Нет других чатов",

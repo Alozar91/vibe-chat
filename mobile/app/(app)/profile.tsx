@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import { usersApi } from "../../src/api/endpoints";
 import { logout } from "../../src/services/session-service";
+import { notificationsEnabled, openNotificationSettings } from "../../src/services/push-service";
 import { useSession } from "../../src/stores/session";
 import { t } from "../../src/i18n/ru";
 import { theme } from "../../src/theme";
@@ -32,8 +33,11 @@ export default function ProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
+    void notificationsEnabled().then(setNotifEnabled);
+
     usersApi
       .me()
       .then((u) => {
@@ -168,6 +172,13 @@ export default function ProfileScreen() {
 
           {isAdmin ? <InviteAdminSection /> : null}
 
+          <Text style={[styles.section, styles.label]}>{t("profile.notifications")}</Text>
+          <Pressable style={styles.notifRow} onPress={() => void openNotificationSettings()}>
+            <Text style={styles.notifText}>
+              {notifEnabled === false ? t("profile.notificationsOff") : t("profile.notificationsOn")}
+            </Text>
+          </Pressable>
+
           <Pressable style={styles.logoutBtn} onPress={onLogout}>
             <Text style={styles.logoutText}>{t("profile.logout")}</Text>
           </Pressable>
@@ -230,6 +241,15 @@ const styles = StyleSheet.create({
   saveBtnText: { color: theme.colors.primaryText, fontSize: theme.font.md, fontWeight: "500" },
   saved: { color: theme.colors.accentGreen, fontSize: theme.font.sm, marginTop: theme.spacing.sm },
   error: { color: theme.colors.danger, fontSize: theme.font.sm, marginTop: theme.spacing.sm },
+  notifRow: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.sm,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+  },
+  notifText: { fontSize: theme.font.md, color: theme.colors.text },
   logoutBtn: {
     borderWidth: 1,
     borderColor: theme.colors.danger,

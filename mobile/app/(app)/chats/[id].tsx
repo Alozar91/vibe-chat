@@ -19,6 +19,7 @@ import { messagesApi } from "../../../src/api/endpoints";
 import { useSession } from "../../../src/stores/session";
 import { useRealtime } from "../../../src/stores/realtime";
 import { wsClient } from "../../../src/services/ws-client";
+import { setActiveChatId } from "../../../src/services/push-service";
 import {
   FileTooLargeError,
   type UploadHandle,
@@ -57,6 +58,12 @@ export default function ChatScreen() {
   const [editing, setEditing] = useState<Message | null>(null);
   const lastTypingSent = useRef(0);
   const markReadRef = useRef(false);
+
+  // открытый чат глушит/смывает свои push-уведомления (§3.5)
+  useEffect(() => {
+    setActiveChatId(chatId);
+    return () => setActiveChatId(null);
+  }, [chatId]);
 
   const title = useMemo(() => {
     if (detail.data?.type === "group") return detail.data.title ?? t("chats.title");

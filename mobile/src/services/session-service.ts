@@ -22,6 +22,12 @@ import {
 } from "./kc-auth";
 import { clearTokens, loadTokens, saveTokens } from "./token-storage";
 import { clearCacheStorage } from "./offline-cache";
+import {
+  ensureNotificationChannel,
+  registerPushToken,
+  requestNotificationPermission,
+  unregisterPushToken,
+} from "./push-service";
 import type { TokenResponse } from "./kc-auth";
 
 interface UserMe {
@@ -41,6 +47,26 @@ async function persistTokens(tokens: TokenResponse): Promise<void> {
 async function fetchMe(accessToken: string): Promise<SessionUser> {
   const me = await api<UserMe>("/users/me", { accessToken });
   return { id: me.id, username: me.username, display_name: me.display_name };
+}
+
+/**
+ * Пуши после входа (§3.9): разрешение → канал → регистрация токена.
+ * Fire-and-forget: отказ/ошибка не мешают работе приложения (без пушей — ок).
+ * Разрешение спрашивается один раз (не тревожим повторно, §3.9).
+ */
+let permissionAsked = false;
+
+async function setupPush(): Promise<void> {
+  if (permissionAsked) {
+    // диалог уже был (не важно чем кончился) — только перерегистрация токена
+    await registerPushToken();
+    return;
+  }
+  permissionAsked = true;
+  const granted = await requestNotificationPermission();
+  if (!granted) return; // §3.9: отказ — приложение работает без пушей
+  await ensureNotificationChannel();
+  await registerPushToken();
 }
 
 /** ROPC-логин: нативная форма → KC token endpoint → /users/me. */
@@ -67,6 +93,7 @@ export async function login(username: string, password: string): Promise<void> {
   const user = await fetchMe(tokens.access_token);
   useSession.getState().setUser(user);
   useSession.getState().setAuthenticated(true);
+  void setupPush();
 }
 
 // ── PKCE-fallback (§3.2): Custom Tab → vibechat://callback → обмен кода ────
@@ -138,6 +165,7 @@ export async function restoreSession(): Promise<void> {
     const user = await fetchMe(tokens.access_token);
     useSession.getState().setUser(user);
     useSession.getState().setAuthenticated(true);
+    void setupPush();
   } catch {
     await clearTokens();
     useSession.getState().setUser(null);
@@ -168,10 +196,11 @@ export async function getAccessToken(): Promise<string | null> {
   return refreshAccessToken();
 }
 
-/** Logout: revoke → очистка локального состояния (§3.2; пуши — этап 6). */
+/** Logout: revoke → отвязка пуш-токена → очистка локального состояния (§3.2, §3.8). */
 export async function logout(): Promise<void> {
   const stored = await loadTokens();
   if (stored?.refresh_token) await revokeToken(stored.refresh_token);
+  await unregisterPushToken(); // нужен живой access — до logoutLocal
   await logoutLocal();
 }
 
