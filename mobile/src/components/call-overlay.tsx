@@ -9,12 +9,18 @@
  *
  * Этап 9 (аудио): ринг-карточка direct, баннер чужого group-звонка,
  * панель активного аудио (таймер, mute, динамик, hang-up, состав).
- * Видео — этап 10 (полноэкранные плитки VideoTrack).
+ * Этап 10 (видео): полноэкранный оверлей — remote на весь экран + PiP себя
+ * (direct) или грид плиток (group), кнопки камера/микрофон/динамик/сброс;
+ * keep-awake на время звонка. Ринг-карточка проверяется РАНЬШЕ видео-ветки
+ * (иначе перекрывала «Ответить/Отклонить» — тот же баг, что в вебе §17).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Modal, Pressable, StyleSheet, Text, Vibration, View } from "react-native";
+import { VideoView } from "@livekit/react-native";
+import type { VideoTrack } from "livekit-client";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { chatsApi } from "../api/endpoints";
 import { queryKeys } from "../api/query-keys";
@@ -49,6 +55,9 @@ export function CallOverlay() {
   const media = useCalls((s) => s.media);
   const muted = useCalls((s) => s.muted);
   const speakerOn = useCalls((s) => s.speakerOn);
+  const camOn = useCalls((s) => s.camOn);
+  const remoteCams = useCalls((s) => s.remoteCams);
+  const localCam = useCalls((s) => s.localCam);
   const error = useCalls((s) => s.error);
   const accept = useCalls((s) => s.accept);
   const reject = useCalls((s) => s.reject);
@@ -56,6 +65,7 @@ export function CallOverlay() {
   const join = useCalls((s) => s.join);
   const leave = useCalls((s) => s.leave);
   const toggleMute = useCalls((s) => s.toggleMute);
+  const toggleCam = useCalls((s) => s.toggleCam);
   const toggleSpeaker = useCalls((s) => s.toggleSpeaker);
   const myId = useSession((s) => s.user?.id ?? "");
 
@@ -94,6 +104,20 @@ export function CallOverlay() {
     if (prevStatus.current && status && prevStatus.current !== status) buzz();
     prevStatus.current = status;
   }, [call?.status]);
+
+  // экран не гаснет во время звонка (§3.12 — обязательно для видео)
+  const hasCall = !!call;
+  useEffect(() => {
+    if (!hasCall) return;
+    let mounted = true;
+    void activateKeepAwakeAsync().catch(() => {});
+    return () => {
+      if (mounted) {
+        mounted = false;
+        deactivateKeepAwake();
+      }
+    };
+  }, [hasCall]);
 
   if (!call && !error) return null;
 
@@ -139,6 +163,26 @@ export function CallOverlay() {
             accept={() => void accept()}
             reject={() => void reject()}
             cancel={() => void cancel()}
+          />
+        ) : isVideo ? (
+          <ActiveVideo
+            peerLabel={peerLabel}
+            isGroup={isGroup}
+            myId={myId}
+            memberNames={memberNames}
+            media={media}
+            muted={muted}
+            camOn={camOn}
+            speakerOn={speakerOn}
+            remoteCams={remoteCams}
+            localCam={localCam}
+            duration={duration}
+            insetsTop={insets.top}
+            insetsBottom={insets.bottom}
+            toggleMute={() => void toggleMute()}
+            toggleCam={() => void toggleCam()}
+            toggleSpeaker={() => void toggleSpeaker()}
+            leave={() => void leave()}
           />
         ) : (
           <ActivePanel
@@ -204,6 +248,225 @@ function RingCard(props: {
           <Text style={styles.errorText}>{t(`call.${props.error}` as never)}</Text>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** Живая плитка видео или заглушка с аватаром. */
+function VideoTile(props: {
+  name: string;
+  track: VideoTrack | null;
+  mirror: boolean;
+  zOrder: number;
+  style?: object;
+  isSelf?: boolean;
+}) {
+  if (props.track) {
+    return (
+      <View style={[styles.tile, props.style]}>
+        <VideoView
+          videoTrack={props.track}
+          style={{ ...StyleSheet.absoluteFillObject }}
+          objectFit="cover"
+          mirror={props.mirror}
+          zOrder={props.zOrder}
+        />
+        <View style={styles.tileLabelWrap} pointerEvents="none">
+          <Text style={styles.tileLabel} numberOfLines={1}>
+            {props.name}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={[styles.tile, styles.tileAvatarBg, props.style]}>
+      <View style={styles.tileAvatar}>
+        <Text style={styles.avatarText}>{props.name.slice(0, 2).toUpperCase()}</Text>
+      </View>
+      <View style={styles.tileLabelWrap} pointerEvents="none">
+        <Text style={styles.tileLabel} numberOfLines={1}>
+          {props.name}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Активный видео-звонок (этап 10): полноэкранный оверлей.
+ * direct — собеседник на весь экран + PiP себя справа сверху;
+ * group — грид плиток до 8 камер (2×N, §17), своя плитка первая.
+ * При отсутствии живых камер — заглушки с аватарами + подпись «Видео выключено».
+ */
+function ActiveVideo(props: {
+  peerLabel: string;
+  isGroup: boolean;
+  myId: string;
+  memberNames: Map<string, string>;
+  media: string;
+  muted: boolean;
+  camOn: boolean;
+  speakerOn: boolean;
+  remoteCams: Record<string, VideoTrack | null>;
+  localCam: VideoTrack | null;
+  duration: number;
+  insetsTop: number;
+  insetsBottom: number;
+  toggleMute: () => void;
+  toggleCam: () => void;
+  toggleSpeaker: () => void;
+  leave: () => void;
+}) {
+  // плитки: своя первая, потом участники с participant_ids (как в аудио-панели)
+  const tiles = useMemo(() => {
+    const list: { id: string; name: string; track: VideoTrack | null; self: boolean }[] = [
+      { id: props.myId, name: t("call.me"), track: props.localCam, self: true },
+    ];
+    for (const [id, track] of Object.entries(props.remoteCams)) {
+      if (id === props.myId) continue;
+      list.push({ id, name: props.memberNames.get(id) ?? id.slice(0, 8), track, self: false });
+    }
+    return list.slice(0, 8); // до 8 камер (§17)
+  }, [props.myId, props.localCam, props.remoteCams, props.memberNames]);
+
+  const anyVideo = tiles.some((x) => x.track);
+  const rows = Math.max(1, Math.ceil(tiles.length / 2));
+  const connected = props.media === "connected";
+
+  if (!props.isGroup) {
+    // 1:1: собеседник на весь экран, себя — PiP справа сверху
+    const peerTile = tiles.find((x) => !x.self);
+    return (
+      <View style={styles.videoRoot}>
+        <VideoTile
+          name={props.peerLabel}
+          track={peerTile?.track ?? null}
+          mirror={false}
+          zOrder={0}
+          style={styles.videoFullscreen}
+        />
+        {!anyVideo ? <Text style={styles.videoOffHint}>{t("call.videoOffAll")}</Text> : null}
+        {props.localCam ? (
+          <View style={[styles.pip, { top: props.insetsTop + 52, right: theme.spacing.lg }]}>
+            <VideoView
+              videoTrack={props.localCam}
+              style={{ ...StyleSheet.absoluteFillObject }}
+              objectFit="cover"
+              mirror
+            />
+          </View>
+        ) : null}
+        <VideoHeader
+          peerLabel={props.peerLabel}
+          media={props.media}
+          duration={props.duration}
+          insetsTop={props.insetsTop}
+        />
+        <VideoControls
+          insetsBottom={props.insetsBottom}
+          muted={props.muted}
+          camOn={props.camOn}
+          speakerOn={props.speakerOn}
+          connected={connected}
+          toggleMute={props.toggleMute}
+          toggleCam={props.toggleCam}
+          toggleSpeaker={props.toggleSpeaker}
+          leave={props.leave}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.videoRoot}>
+      <View style={styles.gridWrap}>
+        {tiles.map((x) => (
+          <VideoTile
+            key={x.id}
+            name={x.name}
+            track={x.track}
+            mirror={x.self}
+            zOrder={x.self ? 1 : 0}
+            style={{ width: "50%", height: `${100 / rows}%` }}
+          />
+        ))}
+      </View>
+      {!anyVideo ? <Text style={styles.videoOffHint}>{t("call.videoOffAll")}</Text> : null}
+      <VideoHeader
+        peerLabel={props.peerLabel}
+        media={props.media}
+        duration={props.duration}
+        insetsTop={props.insetsTop}
+      />
+      <VideoControls
+        insetsBottom={props.insetsBottom}
+        muted={props.muted}
+        camOn={props.camOn}
+        speakerOn={props.speakerOn}
+        connected={connected}
+        toggleMute={props.toggleMute}
+        toggleCam={props.toggleCam}
+        toggleSpeaker={props.toggleSpeaker}
+        leave={props.leave}
+      />
+    </View>
+  );
+}
+
+/** Шапка поверх видео: имя, статус-точка, таймер. */
+function VideoHeader(props: { peerLabel: string; media: string; duration: number; insetsTop: number }) {
+  return (
+    <View style={[styles.videoHeader, { top: props.insetsTop + 8 }]} pointerEvents="none">
+      <View style={[styles.statusDot, { backgroundColor: props.media === "connected" ? theme.colors.accentGreen : "#eab308" }]} />
+      <Text style={styles.videoName} numberOfLines={1}>
+        {props.peerLabel}
+      </Text>
+      <Text style={styles.videoTimer}>
+        {props.media === "connected" ? fmtDuration(props.duration) : t("call.connecting")}
+      </Text>
+    </View>
+  );
+}
+
+/** Кнопки поверх видео: микрофон / камера / динамик / сброс. */
+function VideoControls(props: {
+  insetsBottom: number;
+  muted: boolean;
+  camOn: boolean;
+  speakerOn: boolean;
+  connected: boolean;
+  toggleMute: () => void;
+  toggleCam: () => void;
+  toggleSpeaker: () => void;
+  leave: () => void;
+}) {
+  return (
+    <View style={[styles.videoControls, { bottom: props.insetsBottom + 24 }]}>
+      <Pressable
+        style={[styles.videoBtn, props.muted && styles.dangerOn]}
+        onPress={props.toggleMute}
+        disabled={!props.connected}
+      >
+        <Text style={styles.videoBtnText}>{props.muted ? "🔇" : "🎙"}</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.videoBtn, !props.camOn && styles.dangerOn]}
+        onPress={props.toggleCam}
+        disabled={!props.connected}
+      >
+        <Text style={styles.videoBtnText}>{props.camOn ? "🎥" : "🚫"}</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.videoBtn, props.speakerOn && styles.okOn]}
+        onPress={props.toggleSpeaker}
+        disabled={!props.connected}
+      >
+        <Text style={styles.videoBtnText}>🔈</Text>
+      </Pressable>
+      <Pressable style={[styles.videoBtn, styles.danger]} onPress={props.leave} accessibilityLabel={t("call.hangup")}>
+        <Text style={styles.videoBtnText}>📵</Text>
+      </Pressable>
     </View>
   );
 }
@@ -374,6 +637,91 @@ const styles = StyleSheet.create({
   smallBtnText: { fontSize: 17 },
   dangerOn: { backgroundColor: theme.colors.danger },
   okOn: { backgroundColor: theme.colors.accentGreen },
+  // --- видео (этап 10) ---
+  videoRoot: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000",
+    zIndex: 50,
+  },
+  videoFullscreen: { ...StyleSheet.absoluteFillObject },
+  pip: {
+    position: "absolute",
+    width: 110,
+    height: 165,
+    borderRadius: theme.radius.md,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    elevation: 6,
+  },
+  videoHeader: {
+    position: "absolute",
+    left: theme.spacing.xl,
+    right: theme.spacing.xl,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderRadius: theme.radius.full,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    alignSelf: "flex-start",
+    minWidth: 220,
+  },
+  videoName: { color: "#fff", fontSize: theme.font.md, fontWeight: "600", flexShrink: 1 },
+  videoTimer: { color: "rgba(255,255,255,0.8)", fontSize: theme.font.sm },
+  videoControls: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: theme.spacing.xl,
+  },
+  videoBtn: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "rgba(30,30,30,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoBtnText: { fontSize: 24 },
+  gridWrap: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingTop: 96,
+  },
+  tile: { overflow: "hidden", backgroundColor: "#111" },
+  tileAvatarBg: { alignItems: "center", justifyContent: "center" },
+  tileAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tileLabelWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+  },
+  tileLabel: { color: "#fff", fontSize: theme.font.sm },
+  videoOffHint: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 120,
+    textAlign: "center",
+    color: "rgba(255,255,255,0.75)",
+    fontSize: theme.font.sm,
+  },
   errorToast: {
     position: "absolute",
     left: theme.spacing.xl,

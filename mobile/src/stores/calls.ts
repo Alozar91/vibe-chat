@@ -7,7 +7,7 @@
 
 import { AudioSession } from "@livekit/react-native";
 import { create } from "zustand";
-import { Room, RoomEvent } from "livekit-client";
+import { Room, RoomEvent, Track, type VideoTrack } from "livekit-client";
 import { PermissionsAndroid, Platform, Vibration, type Permission } from "react-native";
 import { callsApi } from "../api/endpoints";
 import type { Call } from "../api/types";
@@ -26,6 +26,10 @@ interface CallsState {
   muted: boolean;
   /** Камера (этап 10, видео). */
   camOn: boolean;
+  /** Живые (subscribed+unmuted) камеры удалённых участников по identity. */
+  remoteCams: Record<string, VideoTrack | null>;
+  /** Мой локальный видео-трек (для PiP/своей плитки); null = камера выключена. */
+  localCam: VideoTrack | null;
   /** Громкая связь; default — earpiece у аудио-звонков. */
   speakerOn: boolean;
   error: string | null;
@@ -65,6 +69,8 @@ export const useCalls = create<CallsState>((set, get) => ({
   remoteIds: [],
   muted: false,
   camOn: false,
+  remoteCams: {},
+  localCam: null,
   speakerOn: false,
   error: null,
 
@@ -117,6 +123,7 @@ export const useCalls = create<CallsState>((set, get) => ({
     setErrorState(null);
     try {
       await ensureMicPermission();
+      if (kind === "video" && !(await ensureCamPermission())) setErrorState("err_cam_denied");
       const call = await callsApi.start(chatId, kind);
       set({ current: call });
       await connectMedia();
@@ -139,6 +146,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       await ensureMicPermission();
       const call = await callsApi.join(callId);
       set({ current: call });
+      if (call.kind === "video" && !(await ensureCamPermission())) setErrorState("err_cam_denied");
       await connectMedia();
     } catch (err) {
       setErrorState(errMessage(err));
@@ -151,6 +159,7 @@ export const useCalls = create<CallsState>((set, get) => ({
     setErrorState(null);
     try {
       await ensureMicPermission();
+      if (call.kind === "video" && !(await ensureCamPermission())) setErrorState("err_cam_denied");
       const updated = await callsApi.accept(call.id);
       set({ current: updated });
       syncRing();
@@ -205,8 +214,27 @@ export const useCalls = create<CallsState>((set, get) => ({
     const room = get().room;
     if (!room) return;
     const next = !get().camOn;
-    await room.localParticipant.setCameraEnabled(next);
-    set({ camOn: next });
+    try {
+      if (next) {
+        // RN-специфика (этап 10): mute глушит капчер и unmute его не возрождает
+        // (сервер навсегда видит muted) — камеру включаем пересозданием трека
+        const lp = room.localParticipant;
+        const pub = lp.getTrackPublication(Track.Source.Camera);
+        if (pub?.track) {
+          try {
+            lp.unpublishTrack(pub.track);
+          } catch {
+            // трек уже мёртв — не критично
+          }
+        }
+        await lp.setCameraEnabled(true);
+      } else {
+        await room.localParticipant.setCameraEnabled(false);
+      }
+      set({ camOn: next });
+    } catch {
+      setErrorState("err_cam_denied");
+    }
   },
 
   toggleSpeaker: async () => {
@@ -228,6 +256,8 @@ export const useCalls = create<CallsState>((set, get) => ({
       remoteIds: [],
       muted: false,
       camOn: false,
+      remoteCams: {},
+      localCam: null,
       speakerOn: false,
       error: null,
     });
@@ -270,6 +300,20 @@ async function ensureMicPermission(): Promise<void> {
   }
 }
 
+/** CAMERA для видеозвонков; отказ — не прерывает звонок (fallback «только звук»). */
+async function ensureCamPermission(): Promise<boolean> {
+  if (Platform.OS !== "android") return true;
+  const perm = PermissionsAndroid.PERMISSIONS.CAMERA as Permission;
+  const has = await PermissionsAndroid.check(perm);
+  if (has) return true;
+  const res = await PermissionsAndroid.request(perm, {
+    title: "Камера",
+    message: "Vibe Chat нужен доступ к камере для видеозвонков",
+    buttonPositive: "OK",
+  });
+  return res === PermissionsAndroid.RESULTS.GRANTED;
+}
+
 // --- LiveKit-подключение (медиа, §17) ---
 
 async function connectMedia(): Promise<void> {
@@ -287,8 +331,39 @@ async function connectMedia(): Promise<void> {
       if (!isCurrent()) return;
       useCalls.setState({ remoteIds: Array.from(lkRoom.remoteParticipants.keys()) });
     };
+    // камеры (этап 10): live = subscribed и не замьючена; остальное — заглушка с аватаром
+    const syncCams = () => {
+      if (!isCurrent()) return;
+      const cams: Record<string, VideoTrack | null> = {};
+      lkRoom.remoteParticipants.forEach((p) => {
+        const pub = p.getTrackPublication(Track.Source.Camera);
+        const v = pub?.videoTrack;
+        cams[p.identity] = pub?.isSubscribed && v && !pub.isMuted ? v : null;
+      });
+      useCalls.setState({ remoteCams: cams });
+    };
+    const syncLocalCam = () => {
+      if (!isCurrent()) return;
+      const pub = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+      // toggleCam мьютит трек (не анпаблишит) — замьюченная камера = PiP скрыт
+      useCalls.setState({ localCam: pub && !pub.isMuted ? pub.videoTrack ?? null : null });
+    };
     lkRoom.on(RoomEvent.ParticipantConnected, syncRemote);
     lkRoom.on(RoomEvent.ParticipantDisconnected, syncRemote);
+    for (const ev of [
+      RoomEvent.TrackSubscribed,
+      RoomEvent.TrackUnsubscribed,
+      RoomEvent.TrackPublished,
+      RoomEvent.TrackUnpublished,
+      RoomEvent.TrackMuted,
+      RoomEvent.TrackUnmuted,
+    ]) {
+      lkRoom.on(ev, syncCams);
+    }
+    lkRoom.on(RoomEvent.LocalTrackPublished, syncLocalCam);
+    lkRoom.on(RoomEvent.LocalTrackUnpublished, syncLocalCam);
+    lkRoom.on(RoomEvent.TrackMuted, syncLocalCam);
+    lkRoom.on(RoomEvent.TrackUnmuted, syncLocalCam);
     lkRoom.on(RoomEvent.Disconnected, () => {
       // сервер закрыл комнату (конец звонка) — стор чистит WS-событие call.ended;
       // здесь — страховка, если событие потерялось
@@ -303,10 +378,12 @@ async function connectMedia(): Promise<void> {
 
     // видео-звонок (этап 10): камера сразу; отказ — fallback «только звук»
     let camOn = false;
+    let localCam: VideoTrack | null = null;
     if (current.kind === "video") {
       try {
         await lkRoom.localParticipant.setCameraEnabled(true);
         camOn = true;
+        localCam = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack ?? null;
       } catch {
         setErrorState("err_cam_denied");
       }
@@ -322,9 +399,12 @@ async function connectMedia(): Promise<void> {
       room: lkRoom,
       media: "connected",
       remoteIds: Array.from(lkRoom.remoteParticipants.keys()),
+      remoteCams: {},
+      localCam,
       camOn,
       speakerOn: wantSpeaker,
     });
+    syncCams();
   } catch {
     // сигналинг-звонок жив; медиа недоступно (LiveKit не запущен / нет UDP)
     useCalls.setState({ media: "idle" });
