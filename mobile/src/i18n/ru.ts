@@ -116,6 +116,7 @@ export const ru = {
   "call.answer": "Ответить",
   "call.decline": "Отклонить",
   "call.acceptNoVideo": "Ответить без видео",
+  "call.switchCam": "Переключить камеру",
   "call.cancel": "Отменить",
   "call.hangup": "Завершить",
   "call.leave": "Выйти из звонка",
@@ -132,6 +133,7 @@ export const ru = {
   "call.err_no_access": "Нет доступа",
   "call.err_mic_denied": "Нужен доступ к микрофону",
   "call.err_cam_denied": "Камера недоступна — только звук",
+  "call.err_cam_switch": "Не удалось переключить камеру",
   "call.err_media_unreachable": "Медиа-сервер недоступен",
   "call.err_generic": "Не удалось выполнить звонок",
 } as const;

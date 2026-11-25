@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Modal, Pressable, StyleSheet, Text, Vibration, View } from "react-native";
+import { Dimensions, Modal, PanResponder, Pressable, StyleSheet, Text, Vibration, View } from "react-native";
 import { VideoView } from "@livekit/react-native";
 import type { VideoTrack } from "livekit-client";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -56,6 +56,7 @@ export function CallOverlay() {
   const muted = useCalls((s) => s.muted);
   const speakerOn = useCalls((s) => s.speakerOn);
   const camOn = useCalls((s) => s.camOn);
+  const facing = useCalls((s) => s.facing);
   const remoteCams = useCalls((s) => s.remoteCams);
   const localCam = useCalls((s) => s.localCam);
   const error = useCalls((s) => s.error);
@@ -66,6 +67,7 @@ export function CallOverlay() {
   const leave = useCalls((s) => s.leave);
   const toggleMute = useCalls((s) => s.toggleMute);
   const toggleCam = useCalls((s) => s.toggleCam);
+  const switchCam = useCalls((s) => s.switchCam);
   const toggleSpeaker = useCalls((s) => s.toggleSpeaker);
   const myId = useSession((s) => s.user?.id ?? "");
 
@@ -166,6 +168,7 @@ export function CallOverlay() {
           />
         ) : isVideo ? (
           <ActiveVideo
+            callId={call.id}
             peerLabel={peerLabel}
             isGroup={isGroup}
             myId={myId}
@@ -173,6 +176,7 @@ export function CallOverlay() {
             media={media}
             muted={muted}
             camOn={camOn}
+            facing={facing}
             speakerOn={speakerOn}
             remoteCams={remoteCams}
             localCam={localCam}
@@ -181,6 +185,7 @@ export function CallOverlay() {
             insetsBottom={insets.bottom}
             toggleMute={() => void toggleMute()}
             toggleCam={() => void toggleCam()}
+            switchCam={() => void switchCam()}
             toggleSpeaker={() => void toggleSpeaker()}
             leave={() => void leave()}
           />
@@ -301,11 +306,13 @@ function VideoTile(props: {
 
 /**
  * Активный видео-звонок (этап 10): полноэкранный оверлей.
- * direct — собеседник на весь экран + PiP себя справа сверху;
+ * direct — собеседник на весь экран + PiP себя справа сверху (тап — обмен местами,
+ * драг — перемещение PiP с прилипанием к левому/правому краю);
  * group — грид плиток до 8 камер (2×N, §17), своя плитка первая.
  * При отсутствии живых камер — заглушки с аватарами + подпись «Видео выключено».
  */
 function ActiveVideo(props: {
+  callId: string;
   peerLabel: string;
   isGroup: boolean;
   myId: string;
@@ -313,6 +320,7 @@ function ActiveVideo(props: {
   media: string;
   muted: boolean;
   camOn: boolean;
+  facing: "user" | "environment";
   speakerOn: boolean;
   remoteCams: Record<string, VideoTrack | null>;
   localCam: VideoTrack | null;
@@ -321,6 +329,7 @@ function ActiveVideo(props: {
   insetsBottom: number;
   toggleMute: () => void;
   toggleCam: () => void;
+  switchCam: () => void;
   toggleSpeaker: () => void;
   leave: () => void;
 }) {
@@ -339,30 +348,33 @@ function ActiveVideo(props: {
   const anyVideo = tiles.some((x) => x.track);
   const rows = Math.max(1, Math.ceil(tiles.length / 2));
   const connected = props.media === "connected";
+  // обмен местами в 1:1 (хук наверху — правила хуков запрещают условный вызов)
+  const swap = useSwapped(props.callId);
 
   if (!props.isGroup) {
-    // 1:1: собеседник на весь экран, себя — PiP справа сверху
+    // 1:1: PiP-участник мал (тап — обмен местами, драг — перемещение),
+    // остальные — на весь экран (по умолчанию собеседник, после тапа — я)
     const peerTile = tiles.find((x) => !x.self);
+    const smallSelf = swap.value;
     return (
       <View style={styles.videoRoot}>
+        {/* полноэкранный: собеседник (зеркалить не надо) или я (зеркало на фронталке) */}
         <VideoTile
-          name={props.peerLabel}
-          track={peerTile?.track ?? null}
-          mirror={false}
+          name={smallSelf ? t("call.me") : props.peerLabel}
+          track={smallSelf ? props.localCam : peerTile?.track ?? null}
+          mirror={smallSelf ? props.facing === "user" : false}
           zOrder={0}
           style={styles.videoFullscreen}
         />
         {!anyVideo ? <Text style={styles.videoOffHint}>{t("call.videoOffAll")}</Text> : null}
-        {props.localCam ? (
-          <View style={[styles.pip, { top: props.insetsTop + 52, right: theme.spacing.lg }]}>
-            <VideoView
-              videoTrack={props.localCam}
-              style={{ ...StyleSheet.absoluteFillObject }}
-              objectFit="cover"
-              mirror
-            />
-          </View>
-        ) : null}
+        <DraggablePip
+          track={smallSelf ? peerTile?.track ?? null : props.localCam}
+          name={smallSelf ? props.peerLabel : t("call.me")}
+          mirror={smallSelf ? false : props.facing === "user"}
+          insetsTop={props.insetsTop}
+          insetsBottom={props.insetsBottom}
+          onSwap={() => swap.set(!smallSelf)}
+        />
         <VideoHeader
           peerLabel={props.peerLabel}
           media={props.media}
@@ -377,6 +389,7 @@ function ActiveVideo(props: {
           connected={connected}
           toggleMute={props.toggleMute}
           toggleCam={props.toggleCam}
+          switchCam={props.switchCam}
           toggleSpeaker={props.toggleSpeaker}
           leave={props.leave}
         />
@@ -392,7 +405,7 @@ function ActiveVideo(props: {
             key={x.id}
             name={x.name}
             track={x.track}
-            mirror={x.self}
+            mirror={x.self ? props.facing === "user" : false}
             zOrder={x.self ? 1 : 0}
             style={{ width: "50%", height: `${100 / rows}%` }}
           />
@@ -413,9 +426,89 @@ function ActiveVideo(props: {
         connected={connected}
         toggleMute={props.toggleMute}
         toggleCam={props.toggleCam}
+        switchCam={props.switchCam}
         toggleSpeaker={props.toggleSpeaker}
         leave={props.leave}
       />
+    </View>
+  );
+}
+
+/** Обмен местами в 1:1: сбрасывается при новом звонке. */
+function useSwapped(callId: string): { value: boolean; set: (v: boolean) => void } {
+  const [value, setValue] = useState(false);
+  useEffect(() => {
+    setValue(false); // новый звонок — раскладка по умолчанию
+  }, [callId]);
+  return { value, set: setValue };
+}
+
+/**
+ * Перемещаемая PiP-плитка (этап 10): перетаскивается по экрану,
+ * при отпускании прилипает к левому/правому краю; тап (без движения)
+ * — обмен местами с полноэкранным видео. Плейсхолдер — как VideoTile
+ * (аватар + имя), чтобы обмен работал и когда камера «малого» выключена.
+ */
+function DraggablePip(props: {
+  track: VideoTrack | null;
+  name: string;
+  mirror: boolean;
+  insetsTop: number;
+  insetsBottom: number;
+  onSwap: () => void;
+}) {
+  const W = 110;
+  const H = 165;
+  const MARGIN = 16;
+  const HEADER_PAD = 52; // под шапку с именем/таймером
+  const CONTROLS_PAD = 96; // над рядом кнопок
+  const win = Dimensions.get("window");
+  const minY = props.insetsTop + HEADER_PAD;
+  const maxY = win.height - H - props.insetsBottom - CONTROLS_PAD;
+  const clamp = (x: number, y: number) => ({
+    x: Math.min(Math.max(x, MARGIN), win.width - W - MARGIN),
+    y: Math.min(Math.max(y, minY), Math.max(minY, maxY)),
+  });
+
+  // позиция — absolute left/top; ref-зеркало для колбэков PanResponder (без staleness)
+  const [box, setBox] = useState(() => clamp(win.width - W - MARGIN, minY));
+  const boxRef = useRef(box);
+  boxRef.current = box;
+  const startRef = useRef({ x: box.x, y: box.y });
+  const movedRef = useRef(false);
+  // PanResponder создаётся один раз — колбэки замыкаются на первый рендер;
+  // актуальный onSwap держим в ref (иначе тап-обмен «застревает» на старом значении)
+  const onSwapRef = useRef(props.onSwap);
+  onSwapRef.current = props.onSwap;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
+      onPanResponderGrant: (e) => {
+        startRef.current = { x: boxRef.current.x, y: boxRef.current.y };
+        movedRef.current = false;
+      },
+      onPanResponderMove: (_e, g) => {
+        movedRef.current = true;
+        const start = startRef.current;
+        setBox(clamp(start.x + g.dx, start.y + g.dy));
+      },
+      onPanResponderRelease: () => {
+        if (!movedRef.current) {
+          onSwapRef.current(); // тап без движения — обмен местами
+          return;
+        }
+        // прилипание к ближайшему горизонтальному краю (y — как оставили)
+        const cur = boxRef.current;
+        setBox(clamp(cur.x + W / 2 < win.width / 2 ? MARGIN : win.width - W - MARGIN, cur.y));
+      },
+    }),
+  ).current;
+
+  return (
+    <View style={[styles.pip, { left: box.x, top: box.y }]} {...panResponder.panHandlers}>
+      <VideoTile name={props.name} track={props.track} mirror={props.mirror} zOrder={1} style={{ ...StyleSheet.absoluteFillObject }} />
     </View>
   );
 }
@@ -435,7 +528,7 @@ function VideoHeader(props: { peerLabel: string; media: string; duration: number
   );
 }
 
-/** Кнопки поверх видео: микрофон / камера / динамик / сброс. */
+/** Кнопки поверх видео: микрофон / камера / смена камеры / динамик / сброс. */
 function VideoControls(props: {
   insetsBottom: number;
   muted: boolean;
@@ -444,6 +537,7 @@ function VideoControls(props: {
   connected: boolean;
   toggleMute: () => void;
   toggleCam: () => void;
+  switchCam: () => void;
   toggleSpeaker: () => void;
   leave: () => void;
 }) {
@@ -462,6 +556,14 @@ function VideoControls(props: {
         disabled={!props.connected}
       >
         <Text style={styles.videoBtnText}>{props.camOn ? "🎥" : "🚫"}</Text>
+      </Pressable>
+      <Pressable
+        style={styles.videoBtn}
+        onPress={props.switchCam}
+        disabled={!props.connected || !props.camOn}
+        accessibilityLabel={t("call.switchCam")}
+      >
+        <Text style={styles.videoBtnText}>🔄</Text>
       </Pressable>
       <Pressable
         style={[styles.videoBtn, props.speakerOn && styles.okOn]}

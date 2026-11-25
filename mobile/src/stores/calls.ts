@@ -26,6 +26,8 @@ interface CallsState {
   muted: boolean;
   /** Камера (этап 10, видео). */
   camOn: boolean;
+  /** Активная камера: user = фронтальная (зеркалится), environment = основная. */
+  facing: "user" | "environment";
   /** Живые (subscribed+unmuted) камеры удалённых участников по identity. */
   remoteCams: Record<string, VideoTrack | null>;
   /** Мой локальный видео-трек (для PiP/своей плитки); null = камера выключена. */
@@ -43,6 +45,8 @@ interface CallsState {
   leave: () => Promise<void>;
   toggleMute: () => Promise<void>;
   toggleCam: () => Promise<void>;
+  /** Переключение фронтальная/основная камера (этап 10). */
+  switchCam: () => Promise<void>;
   toggleSpeaker: () => Promise<void>;
   clear: () => void;
 }
@@ -69,6 +73,7 @@ export const useCalls = create<CallsState>((set, get) => ({
   remoteIds: [],
   muted: false,
   camOn: false,
+  facing: "user",
   remoteCams: {},
   localCam: null,
   speakerOn: false,
@@ -233,13 +238,35 @@ export const useCalls = create<CallsState>((set, get) => ({
             // трек уже мёртв — не критично
           }
         }
-        await lp.setCameraEnabled(true);
+        // сохраняем выбранную камеру (facing) при пересоздании трека
+        await lp.setCameraEnabled(true, get().facing === "user" ? undefined : { facingMode: "environment" });
       } else {
         await room.localParticipant.setCameraEnabled(false);
       }
       set({ camOn: next });
     } catch {
       setErrorState("err_cam_denied");
+    }
+  },
+
+  /** Смена фронтальная/основная: applyConstraints(facingMode) на живом треке
+   * (RN-webrtc сам переключает капчер без renegotiation); трек и sid те же,
+   * поэтому remoteCams/localCam не меняются — меняется только зеркалирование. */
+  switchCam: async () => {
+    const room = get().room;
+    if (!room || !get().camOn) return; // камера выключена — переключать нечего
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const mt = (pub?.videoTrack?.mediaStreamTrack ?? null) as {
+      applyConstraints?: (c: unknown) => Promise<void>;
+    } | null;
+    if (!mt?.applyConstraints) return;
+    const next = get().facing === "user" ? "environment" : "user";
+    try {
+      await mt.applyConstraints({ facingMode: next });
+      set({ facing: next });
+    } catch {
+      // второй камеры нет (или все заняты) — сообщаем и не трогаем состояние
+      setErrorState("err_cam_switch");
     }
   },
 
@@ -262,6 +289,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       remoteIds: [],
       muted: false,
       camOn: false,
+      facing: "user",
       remoteCams: {},
       localCam: null,
       speakerOn: false,
