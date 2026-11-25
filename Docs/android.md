@@ -282,7 +282,7 @@ android/                # генерируется expo prebuild (в git не х
 3. **Чаты и сообщения**: REST + TanStack Query, лента, отправка, пагинация по UUIDv7, **персистентный оффлайн-кэш сообщений** (MMKV)
 4. **Realtime**: WS-ticket, Zustand-стор, реконнект и догоняние
 5. **Вложения**: upload-флоу Silo (presigned PUT → complete), превью, thumbnails/blurhash, **медиа-кэш** (§3.4), просмотр (сетка картинок, список файлов)
-6. **Бэкенд-пуши + версия**: device tokens (PostgreSQL + Alembic), `POST/DELETE /push/tokens`, FCM-шлюз в fanout, `GET /app/version` (§3.8) — документация в `Docs/concept.md`
+6. **Бэкенд-пуши + версия** — **реализовано (2026-11-25, смоук на стенде с драйвером console)**: device tokens (PostgreSQL + Alembic `a3f9c2d81e47`), `POST/DELETE /push/tokens`, FCM-шлюз в fanout (`APP_PUSH_DRIVER=off|console|fcm`, §18 концепции), `GET /app/version`. FCM-креды: `deploy/secrets/firebase-sa.json` (SA `firebase-adminsdk-fbsvc@vibe-chat-dd201`, API включён — проверено validate_only).
 7. **Клиент-пуши**: `POST_NOTIFICATIONS` (runtime, §3.9), FCM-токен, notifee, deep links, настройки уведомлений
 8. **Релизная сборка**: APK (assembleRelease), `applicationId`/версии (§4), иконка/имя, подпись (self-signed для sideload)
 

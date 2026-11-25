@@ -21,3 +21,4 @@ deploy/server.env
 Thumbs.db
 .idea/
 .vscode/
+deploy/secrets/

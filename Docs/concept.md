@@ -359,6 +359,11 @@ PATCH  /bots/{id}                  # description, is_active
 # Mini-apps (каркас)
 POST   /miniapps/{bot_id}/code     # one-time код (JWT-авторизация)
 POST   /miniapps/token             # обмен кода на mat_-токен
+
+# Пуши (§18, этап 6 мобильных)
+POST   /push/tokens                # {token, platform: "android"|"ios"} — upsert по токену (ротация не плодит строк; релогин другого юзера перепривязывает)
+DELETE /push/tokens/{token}        # отвязка (logout); чужой/несуществующий — 404
+GET    /app/version                # без аутентификации: {min_version, latest_version} (настройки APP_MIN_APP_VERSION/APP_LATEST_APP_VERSION)
 ```
 
 ## 13. Деплой и конфигурация
@@ -490,3 +495,22 @@ Join-модель реализована end-to-end: `POST /calls` в **group**-
 - **A. Аудио 1:1**: — **реализовано (2026-11-13)**.
 - **B. Групповые аудио** — **реализовано (2026-11-19)**: join-модель для group-чатов, живой состав в звонке, групповой UI. Схема и REST из A переиспользуются.
 - **C. Видео** — **реализовано (2026-11-19, проверено на стенде)**: публикация камеры + плитки, шаринг экрана. Тот же контур, только UI.
+
+## 18. Push-уведомления (этап 6 мобильных — реализовано 2026-11-25)
+
+### Архитектура: свой FCM-шлюз, без firebase-admin
+
+- Транспорт — **FCM HTTP v1** напрямую (`https://fcm.googleapis.com/v1/projects/{project}/messages:send`): JWT RS256 (SA-ключ `APP_FCM_CREDENTIALS_FILE`, `deploy/secrets/firebase-sa.json` — не в git) → OAuth2-токен (кэш 55 мин) → POST. Зависимости — `pyjwt[crypto]` + `httpx` (уже в проекте), без тяжёлого `firebase-admin`.
+- Драйвер задаётся `APP_PUSH_DRIVER`: `off` (по умолчанию, пуши выключены) / `console` (эмуляция в лог — dev и тесты) / `fcm`. Единый интерфейс `send(tokens, title, body, data) → dead_tokens`; HTTP 400/404/410 от FCM = токен мёртв (`UNREGISTERED` после переустановки приложения) → авто-удаление из БД.
+- Ошибки пуша **не ломают основной путь** отправки сообщения (try/except вокруг fanout, logger.exception).
+
+### Триггер и логика (Docs/android.md §3.5, §3.8)
+
+- Пуш — **только на новые не-system сообщения**: хук в `publish_message_new` (realtime) — typing/presence/реакции/edit/delete не пушатся; системные сообщения — нет.
+- Получатель пропускается, если: он отправитель; у него **0 активных WS-соединений** нет (пуш не нужен — realtime доставил; presence-счётчик Valkey `presence:{user_id}`); нет device-токенов.
+- **Агрегация**: контрольная точка `last_pushed_message_id` на токен; `count` = сообщения чата после `max(контрольной точки, last_read_message_id участника)` — прочитанное на другом устройстве не считается; тело — текст последнего сообщения (обрезка 120), title — название чата (fallback «Vibe Chat»). Payload data — **только идентификаторы** (`chat_id`, `message_id`, `count`): текст клиент подтягивает сам (токены FCM чужого бэкенда не шифруются).
+- Схема БД: таблица `device_tokens` (PK = токен, `user_id`, `platform`, `last_pushed_message_id`, `last_seen_at`); миграция `a3f9c2d81e47`.
+
+### Версия клиента
+
+- `GET /api/v1/app/version` — **без аутентификации** (единственное мобильное исключение из «никаких мобильных эндпоинтов», Docs/android.md §3.8): `{min_version, latest_version}` из настроек `APP_MIN_APP_VERSION` / `APP_LATEST_APP_VERSION` (пустые = не заданы). Клиент (этап 8) при старте сравнивает свою версию с `min_version` — меньше: блокирующий экран «обновите приложение».

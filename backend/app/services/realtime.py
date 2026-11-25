@@ -60,15 +60,19 @@ async def publish_to_user(user_id: str, event_type: str, data: dict[str, Any]) -
 
 
 async def publish_message_new(db: AsyncSession, message: Message) -> None:
-    """message.new участникам (Pub/Sub) + ботам чата (Streams, §10).
+    """message.new участникам (Pub/Sub) + ботам чата (Streams, §10) + пуши офлайн (§3.8).
 
     Payload — полная сериализация тем же serializer'ом, что REST (§9, этап 10.2):
     клиент мержит событие в кэш по id без догоняющего REST-запроса. Ботам тот же
     payload кладётся в Stream плоским словарём (без обёртки {message: ...}).
+    Пуш-фанаут здесь же: только новые сообщения (§3.5), ошибки не ломают WS-путь.
     """
     data = await serialize_message_payload(db, message)
     await publish_message_to_members(db, message.chat_id, "message.new", data)
     await fanout_to_bots(db, message.chat_id, "message.new", data)
+    from app.services import push as push_service
+
+    await push_service.push_message_to_members(db, message.chat_id, message)
 
 
 async def publish_message_edited(db: AsyncSession, message: Message) -> None:

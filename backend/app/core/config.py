@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     livekit_ws_url: str = "ws://localhost:7880"  # публичный адрес WS-сигналинга для клиентов
     call_ring_timeout_seconds: int = 45  # ringing дольше — ended (cleanup, §17)
 
+    # Пуши (Docs/android.md §3.8, этап 6): драйвер off | console (эмуляция) | fcm
+    push_driver: str = "off"
+    # fcm: путь к SA-ключу Firebase (deploy/secrets/firebase-sa.json, не в git) + project_id
+    fcm_credentials_file: str = ""
+    fcm_project_id: str = ""
+
+    # Минимальная/актуальная версия мобильного клиента (§3.8, этап 8):
+    # клиент при старте сравнивает свою версию с min_version — меньше: блокирующий экран
+    min_app_version: str = ""
+    latest_app_version: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

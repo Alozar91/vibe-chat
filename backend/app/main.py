@@ -2,12 +2,17 @@
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 
 from app.core.config import get_settings
 from fastapi import FastAPI
 
 settings = get_settings()
+
+# Корневой уровень INFO: логи сервисов (vibe.push и др.) видны рядом с uvicorn-логами
+# (по умолчанию root WARNING — INFO кастомных логгеров глотается).
+logging.basicConfig(level=logging.INFO)
 
 
 @contextlib.asynccontextmanager
@@ -30,7 +35,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from app.api.v1 import bots, calls, chats, health, invites, messages, miniapps, realtime, users  # noqa: E402
+from app.api.v1 import (  # noqa: E402
+    bots,
+    calls,
+    chats,
+    health,
+    invites,
+    messages,
+    miniapps,
+    push,
+    realtime,
+    users,
+)
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
@@ -41,6 +57,8 @@ app.include_router(messages.router, prefix="/api/v1")
 app.include_router(messages.files_router, prefix="/api/v1")
 app.include_router(calls.router, prefix="/api/v1")
 app.include_router(realtime.router, prefix="/api/v1")
+app.include_router(push.router, prefix="/api/v1")
+app.include_router(push.version_router, prefix="/api/v1")
 app.include_router(bots.admin_router, prefix="/api/v1")
 app.include_router(bots.bot_router, prefix="/api/v1")
 app.include_router(miniapps.router, prefix="/api/v1")
