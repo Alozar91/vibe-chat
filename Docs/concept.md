@@ -15,7 +15,7 @@
 | Слой | Технология |
 |---|---|
 | Backend | Python 3.12+, FastAPI, SQLAlchemy + Alembic, Pydantic v2 / pydantic-settings |
-| Frontend | React + TypeScript, Vite. Только веб-версия; мобильные — перспектива |
+| Frontend | React + TypeScript, Vite. Только веб-версия; мобильные — перспектива (Android: `Docs/android.md`) |
 | СУБД | PostgreSQL (основное хранилище всего: пользователи, чаты, сообщения, файлы-метаданные) |
 | Кэш / Pub/Sub | **Valkey** (не Redis) |
 | Объектное хранилище | **Silo** (S3-совместимый, форк MinIO от Pigsty; не MinIO) |
