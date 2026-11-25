@@ -85,6 +85,36 @@ services:
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
 
+  # ── Dev TURN/STUN (двух-устройственные тесты звонков, §17/§9) ─────────
+  # Эмулятор Android: slirp не пропускает UDP на собственные IP хоста
+  # (10.0.2.2 и LAN-адрес Windows) — медиа эмулятора ходит только через TURN,
+  # анонсируемый LiveKit-ом (rtc.turn_servers в livekit.yaml). TURN_EXTERNAL_IP
+  # задаётся в deploy/.env (dev: eth0 WSL — единственный UDP-достижимый для
+  # эмулятора адрес). Телефон и браузер ходят напрямую (node-ip), TURN им не нужен.
+  # Подробности и ловушки — Docs/android.md §9.
+  coturn:
+    image: coturn/coturn:latest
+    command:
+      - -n
+      - --listening-port=3478
+      - --listening-ip=0.0.0.0
+      - --relay-ip=0.0.0.0
+      - --external-ip=${TURN_EXTERNAL_IP:-172.17.202.182}
+      - --min-port=49160
+      - --max-port=49200
+      - --user=dev:devpass
+      - --realm=vibe.local
+      - --lt-cred-mech
+      - --fingerprint
+      - --no-tls
+      - --no-cli
+      - --log-file=stdout
+    ports:
+      - "3478:3478/udp"   # TURN/STUN
+      - "3478:3478/tcp"
+      # диапазон релея — НИЖЕ динамического диапазона Windows (49152+)
+      - "49160-49200:49160-49200/udp"
+
   # ── Профиль full: приложения в контейнерах ─────────────────────────────
   backend:
     image: backend:dev

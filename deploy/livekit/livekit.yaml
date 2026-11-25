@@ -15,6 +15,23 @@ rtc:
   # Dev-адрес задаётся флагом --node-ip в compose (LIVEKIT_NODE_IP, default 127.0.0.1 —
   # браузер на той же машине).
   use_external_ip: false
+  # turn_servers + stun_servers — внешние coturn для двух-устройственных dev-тестов
+  # (эмулятор Android: slirp не пропускает UDP на собственные IP хоста, поэтому
+  # медиа только через TURN на WSL-интерфейсе; телефон и браузер — напрямую на LAN).
+  # Подробности — Docs/android.md §9. coturn — сервис в docker-compose.yml.
+  stun_servers:
+    - 172.17.202.182
+  turn_servers:
+    - host: 172.17.202.182
+      port: 3478
+      protocol: udp
+      username: dev
+      credential: devpass
+    - host: 192.168.1.64
+      port: 3478
+      protocol: udp
+      username: dev
+      credential: devpass
 keys:
   # dev-ключи; для прода — свои (env compose: LIVEKIT_API_KEY/LIVEKIT_API_SECRET)
   devkey: devsecret
