@@ -16,9 +16,12 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     proxy: {
-      // dev: REST и WS — через vite proxy на backend (Docs/concept.md §13)
+      // dev: REST и WS — через vite proxy на backend (Docs/concept.md §13).
+      // Порт бэкенда переопределяется (8010 — исторический локальный dev-порт,
+      // 8002 — порт, на котором ходит мобильный dev-стенд):
+      //   VITE_API_PROXY=http://localhost:8002 npm run dev
       '/api/v1': {
-        target: 'http://localhost:8010',
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8010',
         ws: true,
       },
     },
