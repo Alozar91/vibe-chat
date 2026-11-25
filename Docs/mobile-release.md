@@ -18,7 +18,7 @@
 - `versionName` — семантическая, `versionCode` — монотонный счётчик, **бамп на каждой release-сборке**, в **двух местах синхронно**:
   - `mobile/app.json` → `expo.version` и `expo.android.versionCode`
   - `mobile/android/app/build.gradle` → `versionCode` / `versionName` (~строки 95–96)
-- Текущее состояние: **`1.0.1` / code `2`** (первый релиз — `1.0.0`/1, сразу заменён обновлением `1.0.1`/2).
+- Текущее состояние: **`1.0.2` / code `3`** (`1.0.0`/1 → `1.0.1`/2 → `1.0.2`/3; 1.0.2 — управление чатами + баннер обновления).
 - Клиент сравнивает с сервером `versionName` (семантика X.Y.Z, `src/services/app-version.ts`); `versionCode` в гейте не участвует.
 
 ```bash
