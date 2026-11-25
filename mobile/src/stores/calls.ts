@@ -252,24 +252,34 @@ export const useCalls = create<CallsState>((set, get) => ({
     }
   },
 
-  /** Смена фронтальная/основная. Важно: applyConstraints({facingMode}) на
-   * Android-капчере (Camera2) НЕ переключает камеру — работает только нативный
-   * MediaStreamTrack._switchCamera() (@livekit/react-native-webrtc): он меняет
-   * капчер без пересогласования; трек и sid те же, поэтому remoteCams/localCam
-   * не меняются — меняется только зеркалирование. */
+  /** Смена фронтальная/основная. В livekit-форке react-native-webrtc
+   * applyConstraints({facingMode}) СПЕЦИАЛЬНО игнорирует смену facingMode
+   * («constraint violation», CameraCaptureController), а _switchCamera() —
+   * просто обёртка над ним. Рабочий путь: enumerateDevices() отдаёт deviceId
+   * (= индекс камеры) и facing — переключаем через LocalVideoTrack.setDeviceId()
+   * (restartTrack + replaceTrack: тот же sid, без пересогласования).
+   * Короткое подмерзание картинки ~1 c — норма. */
   switchCam: async () => {
     const room = get().room;
     if (!room || !get().camOn) return; // камера выключена — переключать нечего
-    const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
-    const mt = (pub?.videoTrack?.mediaStreamTrack ?? null) as {
-      _switchCamera?: () => void;
-    } | null;
-    if (!mt?._switchCamera) {
-      setErrorState("err_cam_switch");
-      return;
-    }
     try {
-      mt._switchCamera();
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+      const lkt = pub?.videoTrack;
+      if (!lkt) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === "videoinput");
+      if (cams.length < 2) {
+        setErrorState("err_cam_switch");
+        return;
+      }
+      // target-facing противоположен текущему
+      const wantFacing = get().facing === "user" ? "environment" : "front";
+      const target = cams.find((d) => (d as { facing?: string }).facing === wantFacing);
+      if (!target) {
+        setErrorState("err_cam_switch");
+        return;
+      }
+      await lkt.setDeviceId(target.deviceId);
       set({ facing: get().facing === "user" ? "environment" : "user" });
     } catch {
       // второй камеры нет (или все заняты) — сообщаем и не трогаем состояние
