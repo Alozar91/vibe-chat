@@ -200,7 +200,7 @@ async def create_upload_url(body: UploadUrlIn, me: UserDep, db: DbDep) -> Upload
     )
     db.add(file_row)
     await db.commit()
-    url = file_service.presign_put(storage_key, body.size, body.mime, get_settings().presign_ttl_seconds)
+    url = file_service.presign_put(storage_key, body.size, get_settings().presign_ttl_seconds)
     return UploadUrlOut(file_id=file_id, upload_url=url, expires_in=get_settings().presign_ttl_seconds)
 
 

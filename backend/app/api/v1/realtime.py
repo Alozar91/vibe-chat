@@ -118,6 +118,14 @@ async def _notify_chatmates(db: AsyncSession, user: User, *, online: bool) -> No
         await rt.publish_to_user(uid, "presence", payload)
 
 
+async def _presence_heartbeat(user_id: str) -> None:
+    """Touch TTL-страховки presence каждые 30 с: ключ живёт, пока живо соединение
+    (PRESENCE_TTL=60 с — защита на нечистое закрытие, не способ обнаружить живость)."""
+    while True:
+        await asyncio.sleep(30)
+        await valkey.presence_touch(user_id)
+
+
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket, user: WsUserDep, db: DbDep) -> None:
     await websocket.accept()
@@ -137,15 +145,17 @@ async def ws_endpoint(websocket: WebSocket, user: WsUserDep, db: DbDep) -> None:
 
     pubsub_task = asyncio.create_task(_pump_pubsub(pubsub, websocket))
     receive_task = asyncio.create_task(_ws_receive_loop(user, chat_ids, websocket))
+    heartbeat_task = asyncio.create_task(_presence_heartbeat(user.id))
 
     try:
         # гонка задач: падение любой закрывает соединение
         _done, pending = await asyncio.wait(
-            {pubsub_task, receive_task}, return_when=asyncio.FIRST_COMPLETED
+            {pubsub_task, receive_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
         )
         for task in pending:
             task.cancel()
     finally:
+        heartbeat_task.cancel()
         pubsub_task.cancel()
         receive_task.cancel()
         await valkey.presence_disconnect(user.id)

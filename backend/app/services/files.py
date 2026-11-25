@@ -69,14 +69,17 @@ def thumb_storage_key(file_id: str) -> str:
     return f"thumbs/{file_id}"
 
 
-def presign_put(storage_key: str, size: int, mime: str, ttl_seconds: int) -> str:
+def presign_put(storage_key: str, size: int, ttl_seconds: int) -> str:
     """Presigned PUT на публичном host (входит в подпись, §13): браузер кладёт файл
-    напрямую в Silo по публичному адресу — как и читает по presigned GET."""
+    напрямую в Silo по публичному адресу — как и читает по presigned GET.
+
+    Content-Type НЕ подписывается (не входит в Params): мобильный XHR/браузер могут
+    продублировать или видоизменить заголовок → SignatureDoesNotMatch. Реальный mime
+    определяет sniffing при complete (§8)."""
     params: dict[str, Any] = {
         "Bucket": get_settings().silo_bucket,
         "Key": storage_key,
         "ContentLength": size,
-        "ContentType": mime,
     }
     url: str = _presign_client().generate_presigned_url("put_object", Params=params, ExpiresIn=ttl_seconds)
     return str(url)
