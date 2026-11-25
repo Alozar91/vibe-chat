@@ -150,6 +150,11 @@ npx expo run:android             # требует ANDROID_HOME + JAVA_HOME из 
   стримит из UNC) — APK копировать на `/mnt/c/...` и ставить оттуда.
 - ADB-клавиатура для pi-droid (`android_type`) уже установлена на эмуляторе
   (`com.android.adbkeyboard`); APK на будущее: `~/.local/opt/apk/ADBKeyboard.apk`.
+- **Микрофон эмулятора по умолчанию — тишина**: для двусторонних звонков включить в окне
+  эмулятора Extended Controls (⋯) → Microphone → «Virtual microphone uses host input»;
+  плюс Windows: Параметры → Конфиденциальность и защита → Микрофон → разрешить классическим
+  приложениям. Выход (звук из хоста) работает всегда; вход (мик) — только после включения
+  (трек публикуется, но несёт тишину).
 
 - `ANDROID_HOME` = `~/.local/opt/platform-tools` (platform-tools 37.0.3, Linux), `JAVA_HOME` = `~/.local/opt/jdk-17.0.21.1+2` — оба прописаны в `~/.profile` (не в `.bashrc` — там guard на неинтерактивные шеллы).
 - Зеркала Aliyun в Gradle не нужны из WSL (`dl.google.com` отсюда доступен напрямую); глобальный init-скрипт `C:\Users\SeregaPC\.gradle\init.d\mirrors.gradle` живёт на Windows-стороне и WSL-сборками не читается.

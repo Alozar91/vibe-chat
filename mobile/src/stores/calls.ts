@@ -43,6 +43,21 @@ interface CallsState {
   clear: () => void;
 }
 
+/** Авто-скрытие тоста ошибки: без него ошибка «401 при истёкшем токене» висит вечно. */
+let errorTimer: ReturnType<typeof setTimeout> | null = null;
+const ERROR_TTL_MS = 4000;
+
+function setErrorState(error: string | null) {
+  if (errorTimer) clearTimeout(errorTimer);
+  useCalls.setState({ error });
+  if (error) {
+    errorTimer = setTimeout(() => {
+      errorTimer = null;
+      if (useCalls.getState().error === error) useCalls.setState({ error: null });
+    }, ERROR_TTL_MS);
+  }
+}
+
 export const useCalls = create<CallsState>((set, get) => ({
   current: null,
   room: null,
@@ -96,17 +111,18 @@ export const useCalls = create<CallsState>((set, get) => ({
 
   start: async (chatId, kind = "audio") => {
     if (get().current) {
-      set({ error: "err_in_call" });
+      setErrorState("err_in_call");
       return;
     }
-    set({ error: null });
+    setErrorState(null);
     try {
       await ensureMicPermission();
       const call = await callsApi.start(chatId, kind);
       set({ current: call });
       await connectMedia();
     } catch (err) {
-      set({ current: null, error: errMessage(err) });
+      set({ current: null });
+      setErrorState(errMessage(err));
     }
   },
 
@@ -115,24 +131,24 @@ export const useCalls = create<CallsState>((set, get) => ({
     // блокируем только join *другого* звонка
     const cur = get().current;
     if (cur && cur.id !== callId) {
-      set({ error: "err_in_call" });
+      setErrorState("err_in_call");
       return;
     }
-    set({ error: null });
+    setErrorState(null);
     try {
       await ensureMicPermission();
       const call = await callsApi.join(callId);
       set({ current: call });
       await connectMedia();
     } catch (err) {
-      set({ error: errMessage(err) });
+      setErrorState(errMessage(err));
     }
   },
 
   accept: async () => {
     const call = get().current;
     if (!call) return;
-    set({ error: null });
+    setErrorState(null);
     try {
       await ensureMicPermission();
       const updated = await callsApi.accept(call.id);
@@ -140,7 +156,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       syncRing();
       await connectMedia();
     } catch (err) {
-      set({ error: errMessage(err) });
+      setErrorState(errMessage(err));
     }
   },
 
@@ -151,7 +167,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       await callsApi.reject(call.id);
       get().clear();
     } catch (err) {
-      set({ error: errMessage(err) });
+      setErrorState(errMessage(err));
     }
   },
 
@@ -162,7 +178,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       await callsApi.cancel(call.id);
       get().clear();
     } catch (err) {
-      set({ error: errMessage(err) });
+      setErrorState(errMessage(err));
     }
   },
 
@@ -173,7 +189,7 @@ export const useCalls = create<CallsState>((set, get) => ({
       await callsApi.leave(call.id);
       get().clear();
     } catch (err) {
-      set({ error: errMessage(err) });
+      setErrorState(errMessage(err));
     }
   },
 
@@ -292,7 +308,7 @@ async function connectMedia(): Promise<void> {
         await lkRoom.localParticipant.setCameraEnabled(true);
         camOn = true;
       } catch {
-        useCalls.setState({ error: "err_cam_denied" });
+        setErrorState("err_cam_denied");
       }
     }
     // аудио-звонок 1:1 — earpiece; видео/групповые — динамик (как в мессенджерах)
@@ -311,6 +327,7 @@ async function connectMedia(): Promise<void> {
     });
   } catch {
     // сигналинг-звонок жив; медиа недоступно (LiveKit не запущен / нет UDP)
-    useCalls.setState({ media: "idle", error: "err_media_unreachable" });
+    useCalls.setState({ media: "idle" });
+    setErrorState("err_media_unreachable");
   }
 }
