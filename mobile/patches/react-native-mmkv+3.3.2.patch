@@ -1,0 +1,22 @@
+diff --git a/node_modules/react-native-mmkv/src/NativeMmkv.ts b/node_modules/react-native-mmkv/src/NativeMmkv.ts
+index 36e3edd..a43a525 100644
+--- a/node_modules/react-native-mmkv/src/NativeMmkv.ts
++++ b/node_modules/react-native-mmkv/src/NativeMmkv.ts
+@@ -100,13 +100,13 @@ export function getMMKVTurboModule(): Spec {
+   try {
+     if (mmkvModule == null) {
+       // 1. Load MMKV TurboModule
++      // PATCH(vibe-chat): RN 0.79 codegen требует ровно один TurboModuleRegistry.get
++      // в spec-файле ("MoreThanOneModuleRegistryCallsParserError"); fallback на
++      // старое имя 'Mmkv' удалён — проект собран с newArch (Expo 53).
+       mmkvModule = TurboModuleRegistry.get<Spec>('MmkvCxx');
+-      if (mmkvModule == null) {
+-        mmkvModule = TurboModuleRegistry.get<Spec>('Mmkv');
+-      }
+       if (mmkvModule == null) {
+         throw new Error(
+-          `Could not find the MMKV TurboModule! (Tried "MmkvCxx" and "Mmkv")`
++          `Could not find the MMKV TurboModule! (Tried "MmkvCxx")`
+         );
+       }
+ 

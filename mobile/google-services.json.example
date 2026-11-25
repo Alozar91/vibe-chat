@@ -1,0 +1,30 @@
+{
+  "_comment": "ЗАГЛУШКА. Скопируйте в google-services.json из Firebase Console (см. mobile/docs/firebase-setup.md). Настоящий файл НЕ коммитится — содержит project_id/ключи проекта.",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "vibe-chat-placeholder",
+    "storage_bucket": "vibe-chat-placeholder.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "ru.vibe.chat.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyPLACEHOLDER-REPLACE-WITH-REAL-KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
