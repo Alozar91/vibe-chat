@@ -52,6 +52,9 @@ services:
       # без переменных импорт упадёт на невалидном redirect URI
       VIBE_PUBLIC_URL: http://localhost:5173
       VIBE_PUBLIC_ORIGIN: http://localhost:5173
+      # frontendUrl realm'а = issuer токенов; бэкенд валидирует iss по
+      # APP_KEYCLOAK_URL — значения должны совпадать
+      VIBE_KC_FRONTEND_URL: http://localhost:8080
       KC_BACKEND_ADMIN_SECRET: ${KC_BACKEND_ADMIN_SECRET:-change-me-backend-admin-secret}
     ports:
       - "8080:8080"

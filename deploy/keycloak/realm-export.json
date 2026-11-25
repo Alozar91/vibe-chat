@@ -4,6 +4,23 @@
   "sslRequired": "external",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
+  "frontendUrl": "${VIBE_KC_FRONTEND_URL}",
+  "requiredActions": [
+    { "alias": "TERMS_AND_CONDITIONS", "enabled": false, "defaultAction": false },
+    { "alias": "UPDATE_PROFILE", "enabled": false, "defaultAction": false },
+    { "alias": "VERIFY_EMAIL", "enabled": false, "defaultAction": false },
+    { "alias": "CONFIGURE_TOTP", "enabled": false, "defaultAction": false },
+    { "alias": "UPDATE_PASSWORD", "enabled": false, "defaultAction": false },
+    { "alias": "UPDATE_EMAIL", "enabled": false, "defaultAction": false },
+    { "alias": "delete_account", "enabled": false, "defaultAction": false },
+    { "alias": "webauthn-register", "enabled": false, "defaultAction": false },
+    { "alias": "webauthn-register-passwordless", "enabled": false, "defaultAction": false },
+    { "alias": "VERIFY_PROFILE", "enabled": false, "defaultAction": false },
+    { "alias": "delete_credential", "enabled": false, "defaultAction": false },
+    { "alias": "idp_link", "enabled": false, "defaultAction": false },
+    { "alias": "CONFIGURE_RECOVERY_AUTHN_CODES", "enabled": false, "defaultAction": false },
+    { "alias": "update_user_locale", "enabled": false, "defaultAction": false }
+  ],
   "defaultDefaultClientScopes": [
     "basic",
     "profile",
@@ -46,6 +63,31 @@
         "http://localhost:3000",
         "${VIBE_PUBLIC_ORIGIN}"
       ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "backend-api"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "mobile",
+      "name": "Vibe Chat Mobile (Android, Docs/android.md §3.2)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "vibechat://callback"
+      ],
+      "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
