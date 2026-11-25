@@ -67,6 +67,19 @@ class Settings(BaseSettings):
     min_app_version: str = ""
     latest_app_version: str = ""
 
+    # Server selection / self-host (концепция §19): discovery /server/info
+    server_name: str = ""  # человекочитаемое имя инсталляции (пусто = клиент покажет hostname)
+    # Кодовое слово сервера (фейс-контроль, §19.5): опционально; пусто = выключено.
+    # Неаутентифицированные эндпоинты (/server/info, /auth/register, /app/version)
+    # требуют заголовок X-Vibe-Join; constant-time + rate-limit на неуспешные.
+    app_join_code: str = ""
+    # Ссылка на раздачу APK этой инсталляции (раньше EXPO_PUBLIC_APP_DOWNLOAD_URL клиента)
+    app_download_url: str = ""
+    # Firebase-конфиг КЛИЕНТА (google-services.json) для /server/info → рантайм-инициализация
+    # Firebase на клиенте (§19.6). Не секрет (публичные идентификаторы). Путь к файлу.
+    firebase_client_config_file: str = ""
+    fcm_client_package: str = "ru.vibe.chat.app"
+
 
 @lru_cache
 def get_settings() -> Settings:

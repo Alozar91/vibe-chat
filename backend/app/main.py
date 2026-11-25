@@ -45,6 +45,7 @@ from app.api.v1 import (  # noqa: E402
     miniapps,
     push,
     realtime,
+    server,
     users,
 )
 
@@ -59,6 +60,7 @@ app.include_router(calls.router, prefix="/api/v1")
 app.include_router(realtime.router, prefix="/api/v1")
 app.include_router(push.router, prefix="/api/v1")
 app.include_router(push.version_router, prefix="/api/v1")
+app.include_router(server.router, prefix="/api/v1")
 app.include_router(bots.admin_router, prefix="/api/v1")
 app.include_router(bots.bot_router, prefix="/api/v1")
 app.include_router(miniapps.router, prefix="/api/v1")

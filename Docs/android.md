@@ -147,6 +147,15 @@ REST API (/api/v1), WebSocket (tickets), presigned Silo, FCM — существ�
 - Два профиля: dev (эмулятор, локальный бэкенд) и стенд `merch-vibe.ru` (`/chat` API/WS, `/vibe-files/` Silo, KC `:8444`); переключение через `.env` при сборке
 - Самодиагностика на старте: доступность REST и host'а Silo — понятное сообщение вместо runtime-падений
 
+### 3.13 Server selection (self-host; Docs/concept.md §19)
+
+- **Порядок запуска:** (1) профиль сервера не задан → экран «Подключение» (`app/connect.tsx`): адрес + опциональное кодовое слово → `GET /server/info` (+ `X-Vibe-Join`) → сохранение профиля; (2) version-gate (§3.8) по `min_version` из профиля/`/app/version`; (3) логин/регистрация. Gate/banner теперь живут ПОСЛЕ выбора сервера.
+- **Решения:** https-only в релизе (debug разрешает `http://10.0.2.2`/`localhost` — dev-тестирование); дефолтного сервера в сборке нет (поле пустое); кодовое слово opt-in (пусто на сервере = не запрашивается); смена сервера = подтверждение + logout + чистка MMKV-кэша и медиа-кэша.
+- **config.ts → динамический:** статические `EXPO_PUBLIC_API_BASE/WS_BASE/KC_*` уходят; всё читается из профиля сервера (`kc_url`, `realm` из `/server/info`; client id `mobile` — константа продукта; base-ы выводятся из origin: `{origin}/api/v1`, WS `{origin}/api/v1/ws` — по канонической схеме одного origin, §19.2 концепции). Silo-адрес клиенту не нужен: URL вложений приходят в сериализации от бэкенда.
+- **Профиль** — `{base_url, join_code, name, kc_url, realm, push, min/latest_version, app_download_url}` в MMKV; `X-Vibe-Join` добавляется api-client'ом ко всем запросам, если код задан.
+- **Пуши (§3.5 + §19.6 концепции) — серверная возможность, не клиентская:** универсальный APK работает с любым сервером; наличие пушей определяет `push.driver` из `/server/info`. `off` → FCM не регистрируется (остальное работает); `fcm` → если `push.firebase` в профиле отличается от зашитого дефолта — рантайм `initializeApp` (secondary app) + `getMessaging(app)` (спайк!), иначе дефолт как раньше.
+- **LiveKit**: не меняется — `ws_url` приходит в room-токене от бэкенда (§3.12), клиент никогда его не вычисляет.
+
 ### 3.8 Контракты API для мобильного (полный перечень)
 
 Существующие эндпоинты (`/api/v1`, §12 концепции) используются как есть: auth, users, chats, messages (с `Idempotency-Key`/`client_ref`, `timezone`), reactions, files (presigned), ws/ticket. Специфика мобильного — только два новых бэкенд-эндпоинта:
