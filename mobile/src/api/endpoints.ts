@@ -5,6 +5,8 @@
 
 import { apiClient } from "../services/api-client";
 import type {
+  Call,
+  CallToken,
   Chat,
   ChatDetail,
   FileOut,
@@ -122,4 +124,17 @@ export const invitesApi = {
       expires_at: expiresAt ?? undefined,
     }),
   deactivate: (id: string) => apiClient.post<Invite>(`/invites/${id}/deactivate`),
+};
+
+export const callsApi = {
+  /** direct → ringing-модель (§17 A); group → сразу active (join-модель §17 B) */
+  start: (chatId: string, kind: "audio" | "video" = "audio") =>
+    apiClient.post<Call>("/calls", { chat_id: chatId, kind }),
+  accept: (callId: string) => apiClient.post<Call>(`/calls/${callId}/accept`),
+  reject: (callId: string) => apiClient.post<Call>(`/calls/${callId}/reject`),
+  cancel: (callId: string) => apiClient.post<Call>(`/calls/${callId}/cancel`),
+  join: (callId: string) => apiClient.post<Call>(`/calls/${callId}/join`),
+  leave: (callId: string) => apiClient.post<Call>(`/calls/${callId}/leave`),
+  /** room-токен LiveKit (TTL ~10 мин, только участник звонка — §17) */
+  token: (callId: string) => apiClient.post<CallToken>(`/calls/${callId}/token`),
 };

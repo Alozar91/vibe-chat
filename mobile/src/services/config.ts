@@ -21,6 +21,12 @@ export const config = {
   kcRealm: required("KC_REALM"),
   kcClientId: required("KC_CLIENT_ID"),
 
+  /** LiveKit WS для звонков (§3.12): бэкенд возвращает ws_url в room-токене;
+   * в dev (ws://localhost:7880) из эмулятора не резолвится — override на
+   * ws://10.0.2.2:7880. На стенде не задан — ws_url (wss://…/chat/livekit) верен.
+   */
+  livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL || null,
+
   /** OAuth endpoints Keycloak (ROPC — token endpoint, PKCE fallback — authorize) */
   get kc() {
     return {

@@ -269,6 +269,7 @@ async def cleanup_stale_calls(db: AsyncSession, *, now: datetime | None = None) 
     if stale_rings:
         await db.commit()
     for call in stale_rings:
+        await _publish_call(db, call, "call.cancelled")
         await _write_call_system(db, call)
 
     actives = (await db.scalars(select(Call).where(Call.status == "active"))).all()
@@ -278,5 +279,6 @@ async def cleanup_stale_calls(db: AsyncSession, *, now: datetime | None = None) 
             call.ended_at = now
             closed += 1
             await db.commit()
+            await _publish_call(db, call, "call.cancelled")
             await _write_call_system(db, call)
     return closed

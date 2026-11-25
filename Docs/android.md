@@ -199,6 +199,40 @@ REST API (/api/v1), WebSocket (tickets), presigned Silo, FCM — существ�
 - **Кандидат post-MVP**: Sentry self-hosted (краши release-сборок); решение принять при появлении реальных пользователей на APK
 - Логи не содержат персональных данных и текстов сообщений
 
+### 3.12 Звонки (этапы 9–10; бэкенд и веб — §17 концепции, реализованы)
+
+Сигналинг и медиа — ровно как у веба (§17): REST-мутации `/calls*`, WS-события `call.*` через общий realtime-диспетчер (§3.3), медиа — прямое подключение к LiveKit по room-токену из `POST /calls/{id}/token`. Бэкенду ничего не нужно — вся работа на клиенте.
+
+**SDK и нативная интеграция**
+
+- Пакеты: `livekit-client` + `@livekit/react-native` + `@livekit/react-native-webrtc` (пример SDK собран с `newArchEnabled=true` — совместимо с нашей Fabric-сборкой)
+- `index.js`: `registerGlobals()` до AppRegistry (там же, где headless push)
+- `MainApplication.kt`: `LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())` до RN-инициализации (audio routing: earpiece/динамик, эхоподавление)
+- Разрешения в манифесте: `RECORD_AUDIO` (уже есть), добавляются `CAMERA`, `MODIFY_AUDIO_SETTINGS`, `BLUETOOTH_CONNECT`; runtime-запрос — `PermissionsAndroid` перед start/accept/join (отказ микрофона → error в сторе, камера при видео → fallback «только звук»)
+- `gradle.properties`: `android.enableDexingArtifactTransform.desugaring=false` (фикс WebRTC-рантайма из AndroidInstallation.md)
+- В `app.json` добавлены плагины `@livekit/react-native-expo-plugin` + `@config-plugins/react-native-webrtc` — нужны только будущим `expo prebuild`; текущий bare-`android/` правится руками
+
+**LiveKit URL и dev-топология**
+
+- `token.ws_url` возвращает бэкенд (`APP_LIVEKIT_WS_URL`); в dev это `ws://localhost:7880`, что из эмулятора не резолвится → optional override `EXPO_PUBLIC_LIVEKIT_URL` в конфиге (dev: `ws://10.0.2.2:7880`; на стенде не задан — `wss://merch-vibe.ru/chat/livekit` корректен как есть)
+- ICE-кандидаты LiveKit анонсирует от `--node-ip`; dev-дефолт `127.0.0.1` обслуживает браузер на хосте, но из эмулятора `127.0.0.1` — сам эмулятор → медиа не пойдёт. На время мобильной тест-сессии: `LIVEKIT_NODE_IP=10.0.2.2 docker compose up -d livekit` (10.0.2.2 из эмулятора = loopback хоста; после тестов вернуть). Подробности — §9
+- `AudioSession.startAudioSession()` перед `room.connect`, `stopAudioSession()` при разрыве; звонок в фоне не держится (foreground service — перспектива, не MVP)
+
+**Состояние и UI**
+
+- Стор — порт вебового `frontend/src/realtime/calls.ts` в `mobile/src/stores/calls.ts` (Zustand вне TanStack Query): `current`/`room`/`media`/`remoteIds`/`muted`/`camOn`, методы start/accept/reject/cancel/join/leave/toggle*; WS-диспатч `call.*` — в `realtime-sync.ts` (case → стор)
+- Ринг — звуковой файл + вибрация (не WebAudio как в вебе): `expo-audio`, луп `assets/sounds/ring.wav` (2-тональный, генерируется скриптом)
+- UI — `src/components/call-overlay.tsx` у корня `(app)/_layout` (звонок не рвётся при навигации, как в вебе): ринг-карточка direct (Ответить/Отклонить; у инициатора — Отменить), баннер чужого group-звонка с «Присоединиться», панель активного аудио (таймер от `started_at`, mute, hang-up, состав из `participant_ids` через кэш чата), полноэкранный видео-оверлей — этап 10
+- **Оверлей в `<Modal>` (e2e)**: sibling-View над native-stack (react-native-screens) не гарантирует z-порядок — панель активного звонка получала нативный узел с корректными bounds (dumpsys), но рисовалась ЗА содержимым экрана (пиксели пустые, a11y-узлов нет), при этом ринг-карточка с elevation 12 была видна. Решение — всё содержимое оверлея в `<Modal transparent statusBarTranslucent>`: отдельное окно поверх всего. Ринг — полноэкранный скрим (pointerEvents auto); активный звонок — root `box-none`, но Android-окно Modal всё равно перехватывает тачи: во время активного звонка UI за панелью заблокирован (как в Telegram/WhatsApp); back при активном звонке не уходит из экрана. Побочный эффект: uiautomator dump периодически не видит содержимое Modal (stale) — проверка UI звонка делается по пикселям скриншота (красная кнопка сброса #dc2626 ≈ 8000 px, зелёная статус-точка)
+- Кнопки 📞/🎥 в шапке чата (`chats/[id]`) → `start(chatId, kind)`
+- `expo-keep-awake` на время звонка (экран не гаснет в активном видео)
+
+**Ограничения MVP**
+
+- Звонок живёт только пока приложение открыто (WS нужен для сигналинга): убили из recents → учасники видят leave; incoming-call при убитом приложении не доставляется (перспектива: FCM data `call.ring` + notifee CallStyle + foreground service — отдельный этап)
+- Шаринг экрана на мобильном — не в MVP (Android 14 требует mediaProjection foreground-service — отдельно)
+- Без интеграции с системным телефоном (ConnectionService/в стиле CallKit) — всё внутри приложения
+
 ## 4. Идентификация приложения
 
 - `applicationId`: **`ru.vibe.chat.app`**
@@ -270,7 +304,7 @@ android/                # генерируется expo prebuild (в git не х
   - передача `messages.timezone` (эффективный пояс отправителя, IANA) при отправке; отображение времени — по `users.time_display`
 
 **Следующие итерации:**
-- Звонки (аудио/видео через LiveKit; на бэкенде реализованы — этапы A/B/C §17, сигналинг `call.*` через общий WS; медиа — напрямую в LiveKit по room-токену, как у веба; room-JWT TTL ~10 мин — единственный случай, когда бэкенд выдаёт токен)
+- Звонки — **этапы 9–10 (§3.12)**: аудио 1:1 ringing-модель + групповые join-модель, видео; SDK `@livekit/react-native`, сигналинг `call.*` через общий WS, room-токен с бэкенда (§17 концепции)
 - Мини-доработки: поиск, management-функции чатов (администрирование участников)
 
 **Не входит:** mini-apps UI (§11 — каркас без UI); боты (серверная подсистема, в UI отображаются как участники чата — отдельной работы нет).
@@ -283,8 +317,10 @@ android/                # генерируется expo prebuild (в git не х
 4. **Realtime**: WS-ticket, Zustand-стор, реконнект и догоняние
 5. **Вложения**: upload-флоу Silo (presigned PUT → complete), превью, thumbnails/blurhash, **медиа-кэш** (§3.4), просмотр (сетка картинок, список файлов)
 6. **Бэкенд-пуши + версия** — **реализовано (2026-11-25, смоук на стенде с драйвером console)**: device tokens (PostgreSQL + Alembic `a3f9c2d81e47`), `POST/DELETE /push/tokens`, FCM-шлюз в fanout (`APP_PUSH_DRIVER=off|console|fcm`, §18 концепции), `GET /app/version`. FCM-креды: `deploy/secrets/firebase-sa.json` (SA `firebase-adminsdk-fbsvc@vibe-chat-dd201`, API включён — проверено validate_only).
-7. **Клиент-пуши** — **реализовано и проверено e2e (2026-11-25)**: FCM-токен → `POST /push/tokens` после логина/restore (relogin перерегистрирует), logout → `DELETE /push/tokens/{token}` + `deleteToken`; permission `POST_NOTIFICATIONS` — системный диалог после логина (§3.9); уведомления — notifee (канал «Сообщения», HIGH); дедуп с realtime (§3.5); тап → deep link `vibechat://chat/{id}` через notifee `getInitialNotification` (холодный старт: poll `authenticated` до 10 с, потом навигация); настройка в профиле — статус + переход в системные настройки канала (`openNotificationSettings`).
-8. **Релизная сборка**: APK (assembleRelease), `applicationId`/версии (§4), иконка/имя, подпись (self-signed для sideload)
+7. **Клиент-пуши** — **реализовано и проверено e2e (2026-11-25)**: FCM-токен → `POST /push/tokens` после логина/restore (relogin перерегистрирует), logout → `DELETE /push/tokens/{token}` + `deleteToken`; permission `POST_NOTIFICATIONS` — системный диалог после логина (§3.9); уведомления — notifee (канал «Сообщения», HIGH); дедуп с realtime (§3.5); тап → deep link `vibechat://chat/{id}` через notifee `getInitialNotification` (холодный старт: poll `authenticated` до 10 с, потом навигация); настройка в профиле — статус + переход в системные настройки канала (`openNotificationSettings`). Пуш с контентом («от кого и что», склейка «N новых сообщений» + InboxStyle) — реализовано и проверено e2e (2026-11-25, решение 2026-11-25: контент собирает бэкенд — §18 концепции)
+8. **Звонки, аудио (этап 9, §3.12)** — **реализовано и проверено e2e (2026-11-25)**: SDK LiveKit RN (`@livekit/react-native` + webrtc, `registerGlobals`, `setup(CommunicationAudioType)`, dexing-фикс), ринг — `expo-audio` луп + вибрация (`src/services/ring.ts`); стор `src/stores/calls.ts` (порт вебового `calls.ts`: current/media/muted/speaker, WS-диспатч в `realtime-sync.ts`); оверлей `src/components/call-overlay.tsx` в `<Modal>`. Проверено e2e против dev-бэкенда (вторая сторона — Python-скрипт-пир с REST+WS): исходящий 1:1 ring → accept → LiveKit connect → publish → завершение; входящий (карточка → accept → панель → сброс), отклонение, отмена исходящего, тайм-аут ринга на бэкенде (45 с: ended + `call.cancelled` в WS + системное «пропущенный звонок»), group-звонок (баннер «идёт звонок · N уч.» → «Присоединиться» → панель с составом → leave). Бэкенд-фикс (2026-11-25): `cleanup_stale_calls` публиковал закрытия в WS — добавлен `call.cancelled` в оба цикла (иначе клиент висел в зомби-ринге до своего тайм-аута на 409)
+9. **Звонки, видео (этап 10)**: полноэкранные плитки VideoView, камера, динамик
+10. **Релизная сборка**: APK (assembleRelease), `applicationId`/версии (§4), иконка/имя, подпись (self-signed для sideload)
 
 Критерии готовности этапов (минимальная приёмка, проверяется вручную на эмуляторе против стенда):
 
@@ -295,7 +331,9 @@ android/                # генерируется expo prebuild (в git не х
 | 3 | отправка → 200 + сообщение в ленте; airplane mode on/off не теряет сообщения; перезапуск приложения с airplane mode показывает кэш |
 | 4 | два устройства/вкладки: сообщение появляется у получателя < 1 с; typing виден; presence обновляется; реконнект после airplane mode догоняет пропущенное (`updated_after`) |
 | 5 | фото из Picker загружается с прогрессом; thumbnail/blurhash показываются; медиа-кэш переживает перезапуск; файл > 100 МБ отклоняется до PUT |
-| 6–7 | smoke-тест пушей (§6): сообщение оффлайн-пользователю → пуш на закрытом приложении; тап → чат; отказ в `POST_NOTIFICATIONS` не ломает приложение |
+| 6–7 | smoke-тест пушей (§6): сообщение оффлайн-пользователю → пуш на закрытом приложении; тап → чат; отказ в `POST_NOTIFICATIONS` не ломает приложение; пуш показывает «от кого и что», склейка нескольких — «N новых сообщений» |
+| 9 | аудио 1:1: у вызываемого ринг-карточка, accept → слышно обоих; reject/cancel → ended; групповой: join/leave, состав живой; сброс одним в 1:1 завершает звонок |
+| 10 | видео: плитки обеих камер, вкл/выкл камеры, звук на динамике |
 | 8 | release-APK устанавливается поверх старой версии с сохранением кэша; `min_version`-блокировка срабатывает на заведомо старой версии |
 
 ## 9. Решённые вопросы

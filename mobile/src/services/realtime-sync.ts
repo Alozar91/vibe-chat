@@ -9,6 +9,7 @@ import { messagesApi } from "../api/endpoints";
 import { queryKeys } from "../api/query-keys";
 import type { Chat, LocalMessage, Message, WsEnvelope } from "../api/types";
 import { upsertMessageInCache } from "../hooks/use-send-message";
+import { useCalls } from "../stores/calls";
 import { useRealtime } from "../stores/realtime";
 import { wsClient } from "./ws-client";
 
@@ -141,8 +142,14 @@ export function installRealtimeSync(queryClient: QueryClient): () => void {
         // unread_count свой — приходит через invalidate после send/markRead
         return;
       }
-      default:
-        return; // call.* и прочие — этапы звонков, игнор
+      default: {
+        // звонки (§3.12): call.* → стор звонков (нужны и для моего эха ринга,
+        // и для чужих) — события касаются статуса звонка (§17)
+        if (envelope.type.startsWith("call.")) {
+          useCalls.getState().handleWsEvent(envelope.type, data);
+        }
+        return;
+      }
     }
   };
 

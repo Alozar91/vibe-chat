@@ -13,8 +13,13 @@
 import "expo-router/entry";
 import messaging from "@react-native-firebase/messaging";
 import notifee, { EventType } from "@notifee/react-native";
+// LiveKit RN (§3.12): глобалы WebRTC (navigator.mediaDevices и др.) —
+// обязателен до загрузки любого кода, использующего livekit-client
+import { registerGlobals } from "@livekit/react-native";
 
 import { handlePushDeepLink, showMessageNotification } from "./src/services/push-service";
+
+registerGlobals();
 
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
   await showMessageNotification(remoteMessage);

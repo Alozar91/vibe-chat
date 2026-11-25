@@ -52,6 +52,25 @@ export interface ChatDetail extends Chat {
   members: ChatMember[];
 }
 
+// --- Звонки (§3.12, §17 концепции) ---
+
+export interface Call {
+  id: string;
+  chat_id: string;
+  initiator_id: string;
+  kind: "audio" | "video";
+  status: "ringing" | "active" | "ended";
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  participant_ids: string[];
+}
+
+export interface CallToken {
+  token: string;
+  ws_url: string;
+}
+
 // --- Messages (§6) ---
 
 export type AttachmentKind = "image" | "video" | "file";

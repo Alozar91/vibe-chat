@@ -17,6 +17,7 @@ import { useSendMessage } from "../../../src/hooks/use-send-message";
 import { randomUUID } from "../../../src/services/uuid";
 import { messagesApi } from "../../../src/api/endpoints";
 import { useSession } from "../../../src/stores/session";
+import { useCalls } from "../../../src/stores/calls";
 import { useRealtime } from "../../../src/stores/realtime";
 import { wsClient } from "../../../src/services/ws-client";
 import { setActiveChatId } from "../../../src/services/push-service";
@@ -70,6 +71,9 @@ export default function ChatScreen() {
     const peer = detail.data?.members.find((m) => m.user_id !== myId)?.user;
     return peer?.display_name ?? "…";
   }, [detail.data, myId]);
+
+  // звонки (§3.12): 📞 аудио / 🎥 видео из шапки чата
+  const startCall = useCalls((s) => s.start);
 
   const senderNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -255,6 +259,20 @@ export default function ChatScreen() {
           </Text>
           {typingLabel ? <Text style={styles.typing}>{typingLabel}</Text> : null}
         </Pressable>
+        <Pressable
+          style={styles.callBtn}
+          onPress={() => void startCall(chatId, "audio")}
+          accessibilityLabel={t("call.outgoingAudio")}
+        >
+          <Text style={styles.callBtnText}>📞</Text>
+        </Pressable>
+        <Pressable
+          style={styles.callBtn}
+          onPress={() => void startCall(chatId, "video")}
+          accessibilityLabel={t("call.outgoingVideo")}
+        >
+          <Text style={styles.callBtnText}>🎥</Text>
+        </Pressable>
       </View>
 
       <FlatList
@@ -438,6 +456,8 @@ const styles = StyleSheet.create({
   back: { paddingHorizontal: theme.spacing.sm },
   backText: { fontSize: 28, color: theme.colors.primary },
   headerCenter: { flex: 1 },
+  callBtn: { paddingHorizontal: theme.spacing.sm, paddingVertical: theme.spacing.xs },
+  callBtnText: { fontSize: 18 },
   title: { fontSize: theme.font.lg, fontWeight: "600", color: theme.colors.text },
   typing: { fontSize: theme.font.sm, color: theme.colors.textSecondary },
   feed: { flex: 1 },
