@@ -252,21 +252,25 @@ export const useCalls = create<CallsState>((set, get) => ({
     }
   },
 
-  /** Смена фронтальная/основная: applyConstraints(facingMode) на живом треке
-   * (RN-webrtc сам переключает капчер без renegotiation); трек и sid те же,
-   * поэтому remoteCams/localCam не меняются — меняется только зеркалирование. */
+  /** Смена фронтальная/основная. Важно: applyConstraints({facingMode}) на
+   * Android-капчере (Camera2) НЕ переключает камеру — работает только нативный
+   * MediaStreamTrack._switchCamera() (@livekit/react-native-webrtc): он меняет
+   * капчер без пересогласования; трек и sid те же, поэтому remoteCams/localCam
+   * не меняются — меняется только зеркалирование. */
   switchCam: async () => {
     const room = get().room;
     if (!room || !get().camOn) return; // камера выключена — переключать нечего
     const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
     const mt = (pub?.videoTrack?.mediaStreamTrack ?? null) as {
-      applyConstraints?: (c: unknown) => Promise<void>;
+      _switchCamera?: () => void;
     } | null;
-    if (!mt?.applyConstraints) return;
-    const next = get().facing === "user" ? "environment" : "user";
+    if (!mt?._switchCamera) {
+      setErrorState("err_cam_switch");
+      return;
+    }
     try {
-      await mt.applyConstraints({ facingMode: next });
-      set({ facing: next });
+      mt._switchCamera();
+      set({ facing: get().facing === "user" ? "environment" : "user" });
     } catch {
       // второй камеры нет (или все заняты) — сообщаем и не трогаем состояние
       setErrorState("err_cam_switch");
