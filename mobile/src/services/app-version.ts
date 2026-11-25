@@ -1,0 +1,59 @@
+/**
+ * Проверка версии приложения при старте (§3.8, этап 8).
+ *
+ * `GET /app/version` (без аутентификации) отдаёт `{min_version, latest_version}`.
+ * Своя версия — versionName из app.json (запекается в бандл через expo-constants).
+ * EXPO_PUBLIC_* для release-сборки пробрасываются В ОБОЛОЧКЕ перед gradlew
+ * (`set -a; source .env; set +a`): @expo/env в export:embed не находит .env,
+ * когда projectRoot резолвится от android/ — проверено на этой машине.
+ * `min_version` пуст или сервер недоступен → гейт открыт (fail-open: если
+ * бэкенда нет, блокировать приложение нечем и незачем). Сравнение —
+ * семантическое по versionName; versionCode монотонный, но не участвует
+ * (гейт честнее требовать семантический минимум, чем код сборки).
+ */
+
+import Constants from "expo-constants";
+import { config } from "./config";
+
+/** versionName этой сборки (из app.json, запекается при сборке). */
+export const ownVersion: string = Constants.expoConfig?.version ?? "0.0.0";
+
+interface VersionGateResult {
+  /** true — версия ниже минимально поддерживаемой, показать блокирующий экран. */
+  blocked: boolean;
+  /** min_version с сервера (для текста на блокирующем экране). */
+  min: string | null;
+}
+
+function parseSemver(value: string): [number, number, number] {
+  const parts = value.trim().split(".").map((p) => parseInt(p, 10) || 0);
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+/** a < b по семантике X.Y.Z. */
+export function isSemverBelow(a: string, b: string): boolean {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] < pb[i];
+  }
+  return false;
+}
+
+export async function fetchVersionGate(): Promise<VersionGateResult> {
+  try {
+    console.log(`[app-version] own=${ownVersion}`);
+    const res = await fetch(`${config.apiBase}/app/version`);
+    if (!res.ok) return { blocked: false, min: null };
+    const data = (await res.json()) as { min_version?: string };
+    const min = data.min_version;
+    const blocked = !min ? false : isSemverBelow(ownVersion, min);
+    console.log(`[app-version] server_min=${min ?? ""} blocked=${blocked}`);
+    if (!min) return { blocked: false, min: null };
+    return { blocked, min };
+  } catch {
+    // сервер недоступен — fail-open (§3.8: блокируем только по явному min_version)
+    console.log("[app-version] fetch failed — fail-open");
+    return { blocked: false, min: null };
+  }
+}

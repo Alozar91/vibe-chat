@@ -52,6 +52,12 @@ export const ru = {
   "profile.notificationsOn": "Включены — настройка канала в системе",
   "profile.notificationsOff": "Отключены — включить в настройках системы",
 
+  "version.blockedTitle": "Требуется обновление",
+  "version.blockedText": "Версия приложения {own} устарела. Минимально поддерживаемая — {min}. Установите новый APK и запустите приложение снова.",
+  "version.download": "Скачать новую версию",
+  "version.noLink": "Ссылку на новую версию выдаёт администратор.",
+  "version.retry": "Проверить снова",
+
   "forward.title": "Переслать сообщение",
   "forward.noChats": "Нет других чатов",
   "forward.send": "Переслать",

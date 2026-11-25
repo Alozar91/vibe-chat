@@ -15,3 +15,6 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+
+# Release keystore и пароли — вне git (бэкап: ~/.local/opt/keystore-backup/vibe-chat)
+keystores/
