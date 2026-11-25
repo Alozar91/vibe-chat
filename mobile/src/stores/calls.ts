@@ -88,8 +88,11 @@ export const useCalls = create<CallsState>((set, get) => ({
     // §17 A: входящий ринг direct / свой ринг-эхо после REST start
     if (type === "call.ring") {
       if (st.current?.id === call.id) {
-        set({ current: call });
-        syncRing();
+        // эхо ринга своего звонка: не откатываем уже активный звонок в ringing
+        if (st.current.status !== "active") {
+          set({ current: call });
+          syncRing();
+        }
         return;
       }
       if (st.current) return; // уже в звонке — чужой ринг игнорируем
