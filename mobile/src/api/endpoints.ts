@@ -22,6 +22,18 @@ export const chatsApi = {
   get: (chatId: string) => apiClient.get<ChatDetail>(`/chats/${chatId}`),
   markRead: (chatId: string, messageId: string) =>
     apiClient.post<void>(`/chats/${chatId}/read`, { message_id: messageId }),
+  /** Direct-чат с пользователем: {chat_id, created} — повторный вызов вернёт существующий (§12). */
+  createDirect: (userId: string) =>
+    apiClient.post<{ chat_id: string; created: boolean }>("/chats/direct", { user_id: userId }),
+  /** Групповой: title + участники (creator добавляется сервером, в member_ids не нужен). */
+  createGroup: (title: string, memberIds: string[]) =>
+    apiClient.post<Chat>("/chats", { title, member_ids: memberIds }),
+  /** Переименование группы (owner/admin, §12). */
+  rename: (chatId: string, title: string) =>
+    apiClient.patch<Chat>(`/chats/${chatId}`, { title }),
+  /** Выход из группы: удаление себя = remove_member себя (leave разрешён, §12). */
+  leave: (chatId: string, meId: string) =>
+    apiClient.delete<void>(`/chats/${chatId}/members/${meId}`),
 };
 
 export interface MessageListParams {
@@ -66,6 +78,9 @@ export const messagesApi = {
   delete: (messageId: string) => apiClient.delete<Message>(`/messages/${messageId}`),
   setReaction: (messageId: string, emoji: string) =>
     apiClient.put<ReactionGroup[]>(`/messages/${messageId}/reactions`, { emoji }),
+  /** Пересылка (§6): копия в выбранные чаты, вложения копируются на сервере. */
+  forward: (messageId: string, chatIds: string[]) =>
+    apiClient.post<Message[]>(`/messages/${messageId}/forward`, { chat_ids: chatIds }),
 };
 
 export const filesApi = {
@@ -84,4 +99,27 @@ export const filesApi = {
 export const usersApi = {
   search: (q: string) => apiClient.get<User[]>(`/users?q=${encodeURIComponent(q)}`),
   me: () => apiClient.get<User>("/users/me"),
+  /** Персональные данные — в PostgreSQL системы (§5); username/пароль не меняются здесь. */
+  updateMe: (patch: Partial<Pick<User, "display_name" | "first_name" | "last_name" | "email" | "time_display" | "timezone">>) =>
+    apiClient.patch<User>("/users/me", patch),
+};
+
+export interface Invite {
+  id: string;
+  max_uses: number | null;
+  uses_count: number;
+  expires_at: string | null;
+  deactivated_at: string | null;
+  created_at: string;
+}
+
+export const invitesApi = {
+  list: () => apiClient.get<Invite[]>("/invites"),
+  /** code — в ответе только при создании (§5: хэш в БД, показать один раз). */
+  create: (maxUses?: number | null, expiresAt?: string | null) =>
+    apiClient.post<Invite & { code: string }>("/invites", {
+      max_uses: maxUses ?? undefined,
+      expires_at: expiresAt ?? undefined,
+    }),
+  deactivate: (id: string) => apiClient.post<Invite>(`/invites/${id}/deactivate`),
 };

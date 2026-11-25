@@ -11,6 +11,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { MessageBubble, ImageViewer } from "../../../src/components/message-bubble";
+import { ForwardDialog } from "../../../src/components/forward-dialog";
 import { useChatDetail, useMarkRead, useMessages } from "../../../src/hooks/use-chats";
 import { useSendMessage } from "../../../src/hooks/use-send-message";
 import { randomUUID } from "../../../src/services/uuid";
@@ -50,7 +51,10 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerList, setViewerList] = useState<string[]>([]);
   const [menuFor, setMenuFor] = useState<Message | null>(null);
+  const [forwardFor, setForwardFor] = useState<Message | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
   const lastTypingSent = useRef(0);
   const markReadRef = useRef(false);
 
@@ -101,6 +105,15 @@ export default function ChatScreen() {
 
   const onSend = async () => {
     const text = input.trim();
+    // режим редактирования: PATCH вместо отправки нового (edit_bar как в вебе, §6)
+    if (editing) {
+      if (!text) return;
+      const target = editing;
+      setEditing(null);
+      setInput("");
+      await messagesApi.edit(target.id, text).catch(() => {});
+      return;
+    }
     if (!text && pending.length === 0) return;
     // ждём ready-вложения (уже загруженные в Silo)
     const notReady = pending.find((p) => !p.ready && !p.error);
@@ -208,14 +221,19 @@ export default function ChatScreen() {
           isMine={m.sender_id === myId || (m as { status?: string }).status !== undefined}
           senderName={m.sender_id ? senderNames.get(m.sender_id) : undefined}
           onPressAttachment={(att: Attachment) => {
-            // картинка → viewer с thumb/url; медиа-кэш под капотом
+            // картинка → лайтбокс со всеми фото чата (как web Lightbox, §3.10)
+            const images = feedData
+              .flatMap((m) => ((m as Message).attachments ?? []))
+              .filter((a) => a.kind === "image")
+              .map((a) => a.url);
+            setViewerList(images);
             setViewerUri(att.url);
           }}
           onLongPress={() => setMenuFor(m)}
         />
       );
     },
-    [myId, senderNames],
+    [myId, senderNames, feedData],
   );
 
   return (
@@ -224,12 +242,12 @@ export default function ChatScreen() {
         <Pressable onPress={() => router.back()} style={styles.back}>
           <Text style={styles.backText}>‹</Text>
         </Pressable>
-        <View style={styles.headerCenter}>
+        <Pressable style={styles.headerCenter} onPress={() => router.push(`/chats/${chatId}/info`)}>
           <Text style={styles.title} numberOfLines={1}>
             {title}
           </Text>
           {typingLabel ? <Text style={styles.typing}>{typingLabel}</Text> : null}
-        </View>
+        </Pressable>
       </View>
 
       <FlatList
@@ -254,6 +272,22 @@ export default function ChatScreen() {
             {t("chat.replyingTo", { text: replyTo.text ?? "…" })}
           </Text>
           <Pressable onPress={() => setReplyTo(null)}>
+            <Text style={styles.replyCancel}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {editing ? (
+        <View style={styles.editBar}>
+          <Text style={styles.replyText} numberOfLines={1}>
+            {t("edit.title")}
+          </Text>
+          <Pressable
+            onPress={() => {
+              setEditing(null);
+              setInput("");
+            }}
+          >
             <Text style={styles.replyCancel}>✕</Text>
           </Pressable>
         </View>
@@ -305,40 +339,81 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <ImageViewer uri={viewerUri} images={viewerList} onClose={() => setViewerUri(null)} />
 
-      {/* контекстное меню (long-tap): реакции / ответить / удалить */}
+      {/* контекстное меню (long-tap): компактный попап — reactbar + действия, как hover-панель веба */}
       <Modal visible={menuFor !== null} transparent animationType="fade" onRequestClose={() => setMenuFor(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuFor(null)}>
           <View style={styles.menu}>
             <View style={styles.menuReactions}>
-              {["👍", "❤️", "😄", "🔥", "✅"].map((emoji) => (
-                <Pressable key={emoji} onPress={() => menuFor && void toggleReaction(menuFor, emoji)}>
-                  <Text style={styles.menuReaction}>{emoji}</Text>
+              {/* API принимает имена эмодзи (§6), не символы — как веб (ChatPage EMOJI_SET) */}
+              {[
+                ["thumbs_up", "👍"],
+                ["heart", "❤️"],
+                ["laugh", "😄"],
+                ["fire", "🔥"],
+                ["check", "✅"],
+              ].map(([name, char]) => (
+                <Pressable
+                  key={name}
+                  style={styles.menuReactionBtn}
+                  onPress={() => menuFor && void toggleReaction(menuFor, name)}
+                >
+                  <Text style={styles.menuReaction}>{char}</Text>
                 </Pressable>
               ))}
             </View>
-            {menuFor && menuFor.type === "text" && !menuFor.deleted_at ? (
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => {
-                  setReplyTo(menuFor);
-                  setMenuFor(null);
-                }}
-              >
-                <Text style={styles.menuItemText}>{t("common.reply")}</Text>
-              </Pressable>
-            ) : null}
-            {menuFor && menuFor.sender_id === myId && menuFor.type === "text" && !menuFor.deleted_at ? (
-              <Pressable style={styles.menuItem} onPress={() => menuFor && void onDelete(menuFor)}>
-                <Text style={[styles.menuItemText, { color: theme.colors.danger }]}>
-                  {t("common.delete")}
-                </Text>
-              </Pressable>
-            ) : null}
+            <View style={styles.menuActions}>
+              {menuFor && menuFor.type === "text" && !menuFor.deleted_at ? (
+                <Pressable
+                  style={styles.menuActionBtn}
+                  onPress={() => {
+                    setReplyTo(menuFor);
+                    setMenuFor(null);
+                  }}
+                >
+                  <Text style={styles.menuActionIcon}>↩</Text>
+                  <Text style={styles.menuActionText}>{t("common.reply")}</Text>
+                </Pressable>
+              ) : null}
+              {menuFor && menuFor.type === "text" && !menuFor.deleted_at ? (
+                <Pressable
+                  style={styles.menuActionBtn}
+                  onPress={() => {
+                    setForwardFor(menuFor);
+                    setMenuFor(null);
+                  }}
+                >
+                  <Text style={styles.menuActionIcon}>➦</Text>
+                  <Text style={styles.menuActionText}>{t("common.forward")}</Text>
+                </Pressable>
+              ) : null}
+              {menuFor && menuFor.sender_id === myId && menuFor.type === "text" && !menuFor.deleted_at ? (
+                <Pressable
+                  style={styles.menuActionBtn}
+                  onPress={() => {
+                    setEditing(menuFor);
+                    setInput(menuFor.text ?? "");
+                    setReplyTo(null);
+                    setMenuFor(null);
+                  }}
+                >
+                  <Text style={styles.menuActionIcon}>✎</Text>
+                  <Text style={styles.menuActionText}>{t("common.edit")}</Text>
+                </Pressable>
+              ) : null}
+              {menuFor && menuFor.sender_id === myId && menuFor.type === "text" && !menuFor.deleted_at ? (
+                <Pressable style={styles.menuActionBtn} onPress={() => menuFor && void onDelete(menuFor)}>
+                  <Text style={[styles.menuActionIcon, { color: theme.colors.danger }]}>✕</Text>
+                  <Text style={[styles.menuActionText, { color: theme.colors.danger }]}>{t("common.delete")}</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         </Pressable>
       </Modal>
+
+      {forwardFor ? <ForwardDialog message={forwardFor} onClose={() => setForwardFor(null)} /> : null}
     </SafeAreaView>
   );
 }
@@ -376,6 +451,15 @@ const styles = StyleSheet.create({
   },
   replyText: { flex: 1, color: theme.colors.textSecondary, fontSize: theme.font.sm },
   replyCancel: { color: theme.colors.textSecondary, paddingHorizontal: theme.spacing.sm },
+  editBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.accentGreen,
+  },
   pendingRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -413,11 +497,22 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     backgroundColor: theme.colors.background,
     borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    minWidth: 220,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
-  menuReactions: { flexDirection: "row", justifyContent: "space-around", marginBottom: 8 },
-  menuReaction: { fontSize: 24, paddingHorizontal: 6 },
-  menuItem: { paddingVertical: 10 },
-  menuItemText: { fontSize: theme.font.md, color: theme.colors.text },
+  menuReactions: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  menuReactionBtn: { padding: 4 },
+  menuReaction: { fontSize: 20 },
+  menuActions: { flexDirection: "row", alignItems: "center", gap: 2 },
+  menuActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: theme.radius.sm,
+  },
+  menuActionIcon: { fontSize: 14, marginRight: 4, color: theme.colors.text },
+  menuActionText: { fontSize: theme.font.sm, color: theme.colors.text },
 });

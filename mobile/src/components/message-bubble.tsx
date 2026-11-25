@@ -4,15 +4,22 @@
  * удалённые — плашка, реакции.
  */
 
-import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { useState } from "react";
+import { Alert, Image, Modal, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
 import type { Attachment, LocalMessage, Message } from "../api/types";
 import { useCachedMedia } from "../hooks/use-cached-media";
 import { useRetryMessage } from "../hooks/use-send-message";
 import { t } from "../i18n/ru";
 import { theme } from "../theme";
 
-export const REACTIONS = ["👍", "❤️", "😄", "🔥", "✅"] as const;
+/** Имя эмодзи → символ (API хранит имена, §6; как EMOJI у веба) */
+export const EMOJI_CHAR: Record<string, string> = {
+  thumbs_up: "👍",
+  heart: "❤️",
+  laugh: "😄",
+  fire: "🔥",
+  check: "✅",
+};
 
 function AttachmentImage({ att }: { att: Attachment }) {
   // thumb (§8) — всегда для image; blurhash-рендер отложен (нужна нативная
@@ -102,7 +109,7 @@ export function MessageBubble({
           <View style={styles.reactionsRow}>
             {message.reactions.map((r) => (
               <Text key={r.emoji} style={styles.reactionChip}>
-                {r.emoji} {r.user_ids.length}
+                {EMOJI_CHAR[r.emoji] ?? r.emoji} {r.user_ids.length}
               </Text>
             ))}
           </View>
@@ -133,20 +140,71 @@ function MetaStatus({ message }: { message: Message | LocalMessage }) {
   return null;
 }
 
-/** Просмотрщик картинок — fullscreen-модал (тап по превью). */
-export function ImageViewer({ uri, onClose }: { uri: string | null; onClose: () => void }) {
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  if (!uri) return null;
+/** Просмотрщик картинок — fullscreen-модал (тап по превью). Modal — как меню чата:
+ * рисуется над всем экраном и гарантированно ловит тачи (plain absolute View
+ * внутри Stack-экрана тап по фону не получал). images — все фото чата:
+ * свайп/стрелки листают (как web Lightbox, §3.10). */
+export function ImageViewer({
+  uri,
+  images = [],
+  onClose,
+}: {
+  uri: string | null;
+  images?: string[];
+  onClose: () => void;
+}) {
+  // локальный uri поверх пропа: свайп не перезаписывается родителем до onClose
+  const [navUri, setNavUri] = useState<string | null>(null);
+  const current = navUri ?? uri;
+  // индекс и счётчик — по current (иначе counter не двигается при стрелках)
+  const index = Math.max(0, images.indexOf(current ?? ""));
+  const hasMany = images.length > 1;
+  const go = (delta: number) => {
+    const next = images[index + delta];
+    if (next) setNavUri(next);
+  };
+  useEffect(() => {
+    if (uri === null) setNavUri(null);
+  }, [uri]);
+  // актуальные данные для PanResponder (useRef создаётся once — замыкание устаревает)
+  const stateRef = useRef({ images, index });
+  stateRef.current = { images, index };
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 30 && Math.abs(g.dx) > Math.abs(g.dy),
+    onPanResponderEnd: (_, g) => {
+      const { images: imgs, index: i } = stateRef.current;
+      if (g.dx < -40) setNavUri(imgs[i + 1] ?? null);
+      else if (g.dx > 40) setNavUri(imgs[i - 1] ?? null);
+    },
+  })).current;
   return (
-    <View style={styles.viewerBackdrop}>
-      <Pressable style={styles.viewerCloseArea} onPress={onClose} />
-      <Image
-        source={{ uri }}
-        style={styles.viewerImage}
-        resizeMode="contain"
-        onError={() => Alert.alert(t("common.unknownError"))}
-      />
-    </View>
+    <Modal visible={uri !== null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.viewerBackdrop} {...(hasMany ? pan.panHandlers : {})}>
+        {/* закрытие: Pressable-фоном (как проверено в e2e — тач доходит),
+            nav-стрелки/счётчик поверх, pointerEvents только на них */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
+          <Image
+            source={{ uri: current ?? "" }}
+            style={styles.viewerImage}
+            resizeMode="contain"
+            onError={() => Alert.alert(t("common.unknownError"))}
+          />
+        </Pressable>
+        {hasMany ? (
+          <View style={styles.viewerNav} pointerEvents="box-none">
+            <Pressable style={styles.viewerNavBtn} onPress={() => go(-1)}>
+              <Text style={styles.viewerNavText}>‹</Text>
+            </Pressable>
+            <Text style={styles.viewerCounter}>
+              {index + 1} / {images.length}
+            </Text>
+            <Pressable style={styles.viewerNavBtn} onPress={() => go(1)}>
+              <Text style={styles.viewerNavText}>›</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    </Modal>
   );
 }
 
@@ -243,6 +301,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  viewerCloseArea: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   viewerImage: { width: "100%", height: "80%" },
+  viewerNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    alignSelf: "stretch",
+    paddingHorizontal: theme.spacing.md,
+    // над dev-banner RN и системной пилюлей (в e2e-баннер перекрывал навигацию)
+    position: "absolute",
+    bottom: theme.spacing.xl,
+    left: 0,
+    right: 0,
+    paddingBottom: 0,
+  },
+  viewerNavBtn: { padding: theme.spacing.md },
+  viewerNavText: { color: "#fff", fontSize: 32, lineHeight: 38 },
+  viewerCounter: { color: "#fff", fontSize: theme.font.sm },
 });

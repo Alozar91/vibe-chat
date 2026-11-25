@@ -21,6 +21,7 @@ import {
   type PkceSession,
 } from "./kc-auth";
 import { clearTokens, loadTokens, saveTokens } from "./token-storage";
+import { clearCacheStorage } from "./offline-cache";
 import type { TokenResponse } from "./kc-auth";
 
 interface UserMe {
@@ -177,6 +178,7 @@ export async function logout(): Promise<void> {
 /** Локальная очистка без revoke (refresh не удался/токенов нет). */
 export async function logoutLocal(): Promise<void> {
   await clearTokens();
+  clearCacheStorage(); // оффлайн-кэш сообщений/чатов не должен переживать смену пользователя
   useSession.getState().setUser(null);
   useSession.getState().setAuthenticated(false);
 }

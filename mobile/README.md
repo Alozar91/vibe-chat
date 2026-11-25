@@ -115,6 +115,48 @@ KC-форма → redirect `vibechat://callback` → обмен кода → «�
   локально на выкачанном бандле) = битый adb-туннель/обрезанный бандл:
   `adb kill-server` → `adb start-server` → свежий `reverse tcp:8081`
 
+## Разработка из WSL (Ubuntu, эта машина)
+
+Windows-сторона остаётся для Android Studio (AVD Manager, Logcat-панель). Сборка и e2e-прогон из WSL:
+
+```bash
+# один раз: JDK 17 + platform-tools (Linux) уже стоят в ~/.local/opt (пути — в ~/.profile)
+. ~/.profile
+
+# 1. запустить эмулятор на Windows (из Android Studio или PowerShell):
+#    C:\Users\SeregaPC\AppData\Local\Android\Sdk\emulator\emulator.exe -avd Pixel_5_API_35
+#
+# 2. проверить, что adb видит устройство (детали — см. «adb из WSL» ниже):
+adb devices
+
+# 3. сборка и запуск
+npx expo run:android             # требует ANDROID_HOME + JAVA_HOME из ~/.profile
+```
+
+### adb из WSL
+
+Эмулятор слушает adb-порт **только на loopback Windows**, а WSL2 здесь в режиме NAT —
+прямой `adb connect 172.x.x.x:5555` из WSL не проходит. Поэтому используется shim:
+
+- `~/.local/opt/bin/adb` — скрипт, прокидывающий вызовы в Windows-`adb.exe`
+  (`/mnt/c/.../platform-tools/adb.exe`), тот уже видит эмулятор. Он идёт первым в PATH
+  (порядок задан в `~/.profile`); конвертирует локальные POSIX-пути в Windows для
+  `install`/`push`/`pull` и чистит `\r` из вывода.
+- Настоящий Linux-adb лежит рядом: `~/.local/opt/platform-tools/adb` (пригодится для
+  физического устройства по Wi-Fi ADB).
+- Если эмулятор запущен, а `adb devices` пуст — перезапустить Windows-adb-сервер:
+  `adb.exe kill-server && adb.exe start-server` (shim пробросит и это).
+- `adb install` из WSL-путей (`\\wsl.localhost\...`) ломается (Streamed Install не
+  стримит из UNC) — APK копировать на `/mnt/c/...` и ставить оттуда.
+- ADB-клавиатура для pi-droid (`android_type`) уже установлена на эмуляторе
+  (`com.android.adbkeyboard`); APK на будущее: `~/.local/opt/apk/ADBKeyboard.apk`.
+
+- `ANDROID_HOME` = `~/.local/opt/platform-tools` (platform-tools 37.0.3, Linux), `JAVA_HOME` = `~/.local/opt/jdk-17.0.21.1+2` — оба прописаны в `~/.profile` (не в `.bashrc` — там guard на неинтерактивные шеллы).
+- Зеркала Aliyun в Gradle не нужны из WSL (`dl.google.com` отсюда доступен напрямую); глобальный init-скрипт `C:\Users\SeregaPC\.gradle\init.d\mirrors.gradle` живёт на Windows-стороне и WSL-сборками не читается.
+- Metro (:8081) и KC (:8080) из эмулятора доступны через `adb reverse tcp:8081` / `adb reverse tcp:8080` (см. «Известные особенности окружения» ниже).
+- Docker (бэкенд/стенд) — через Docker Desktop Windows: `docker` из WSL работает через pipe-прокси, сам демон должен быть запущен на Windows.
+- Скриншоты/видео экрана для pi-droid — `android_screenshot` / `android_record` (scrcpy на Windows тоже можно, но из WSL достаточно adb).
+
 ## Известные особенности окружения (эта машина)
 
 - `dl.google.com` и `plugins.gradle.org` недоступны (connection reset) —

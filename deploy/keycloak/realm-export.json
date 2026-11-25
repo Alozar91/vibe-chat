@@ -4,7 +4,6 @@
   "sslRequired": "external",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
-  "frontendUrl": "${VIBE_KC_FRONTEND_URL}",
   "requiredActions": [
     { "alias": "TERMS_AND_CONDITIONS", "enabled": false, "defaultAction": false },
     { "alias": "UPDATE_PROFILE", "enabled": false, "defaultAction": false },

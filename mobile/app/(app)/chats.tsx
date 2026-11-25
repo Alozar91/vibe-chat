@@ -10,7 +10,6 @@ import { useMemo } from "react";
 import { useChats, useChatDetail } from "../../src/hooks/use-chats";
 import { useSession } from "../../src/stores/session";
 import { useRealtime } from "../../src/stores/realtime";
-import { logout } from "../../src/services/session-service";
 import { theme } from "../../src/theme";
 import { t } from "../../src/i18n/ru";
 import type { Chat } from "../../src/api/types";
@@ -81,18 +80,18 @@ export default function ChatsScreen() {
     return list;
   }, [chats.data]);
 
-  const onLogout = async () => {
-    await logout();
-    router.replace("/login");
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t("chats.title")}</Text>
-        <Pressable onPress={onLogout}>
-          <Text style={styles.headerAction}>{t("chats.profile")}</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable onPress={() => router.push("/new-chat")}>
+            <Text style={styles.headerActionBig}>{"＋"}</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push("/profile")}>
+            <Text style={styles.headerAction}>{t("chats.profile")}</Text>
+          </Pressable>
+        </View>
       </View>
       {status === "closed" ? (
         <View style={styles.banner}>
@@ -130,7 +129,9 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.colors.border,
   },
   headerTitle: { fontSize: theme.font.xl, fontWeight: "700", color: theme.colors.text },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing.md },
   headerAction: { color: theme.colors.primary, fontSize: theme.font.md },
+  headerActionBig: { color: theme.colors.primary, fontSize: 24, fontWeight: "400" },
   banner: {
     backgroundColor: theme.colors.errorBg,
     paddingVertical: theme.spacing.xs,
