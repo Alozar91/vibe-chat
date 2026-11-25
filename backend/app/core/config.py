@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,13 +73,22 @@ class Settings(BaseSettings):
     # Кодовое слово сервера (фейс-контроль, §19.5): опционально; пусто = выключено.
     # Неаутентифицированные эндпоинты (/server/info, /auth/register, /app/version)
     # требуют заголовок X-Vibe-Join; constant-time + rate-limit на неуспешные.
-    app_join_code: str = ""
+    join_code: str = ""
     # Ссылка на раздачу APK этой инсталляции (раньше EXPO_PUBLIC_APP_DOWNLOAD_URL клиента)
-    app_download_url: str = ""
+    # Поле названо с app_ (упало бы в APP_APP_…), поэтому env через AliasChoices:
+    # принимаем APP_DOWNLOAD_URL (канонично) и APP_APP_DOWNLOAD_URL (для совместимости).
+    app_download_url: str = Field(
+        default="", validation_alias=AliasChoices("APP_DOWNLOAD_URL", "APP_APP_DOWNLOAD_URL")
+    )
     # Firebase-конфиг КЛИЕНТА (google-services.json) для /server/info → рантайм-инициализация
     # Firebase на клиенте (§19.6). Не секрет (публичные идентификаторы). Путь к файлу.
-    firebase_client_config_file: str = ""
+    firebase_config_path: str = ""
     fcm_client_package: str = "ru.vibe.chat.app"
+    # KC-адрес ДЛЯ КЛИЕНТОВ в /server/info (§19.4): пусто = keycloak_url.
+    # Случай NAT/dev: бэкенд валидирует issuer по keycloak_url, а клиент ходит
+    # к Keycloak по другому маршруту (эмулятор: 10.0.2.2:8080 при localhost
+    # на хосте). В канонической one-origin-схеме (/kc) не задан.
+    public_keycloak_url: str = ""
 
 
 @lru_cache

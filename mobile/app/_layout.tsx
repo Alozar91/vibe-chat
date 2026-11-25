@@ -14,12 +14,14 @@ import { useRealtime } from "../src/stores/realtime";
 import { theme, useThemedStyles, useThemeStore } from "../src/theme";
 import { t } from "../src/i18n/ru";
 import { handlePkceRedirect } from "../src/services/session-service";
+import Connect from "./connect";
 import { installPushHandlers } from "../src/services/push-service";
 import {
   fetchVersionGate,
   ownVersion,
 } from "../src/services/app-version";
 import { config } from "../src/services/config";
+import { useServerProfile } from "../src/services/server-profile";
 
 const persister = createQueryPersister(storage);
 
@@ -28,6 +30,8 @@ export default function RootLayout() {
   const resolvedTheme = useThemeStore((s) => s.resolved);
   const syncRef = useRef(false);
   const pushRef = useRef(false);
+  // Профиль сервера (§3.13): без него весь app не рендерится — только Connect
+  const serverProfile = useServerProfile((s) => s.profile);
   // Гейт версии (§3.8): блокирующий экран, пока min_version с сервера > собственной;
   // latest_version > собственной → неблокирующий баннер «доступна новая версия»
   const [versionBlocked, setVersionBlocked] = useState(false);
@@ -44,13 +48,17 @@ export default function RootLayout() {
       setVersionLatest(r.latest);
     });
   };
-  useEffect(checkVersion, []);
+  // Гейт имеет смысл только когда сервер выбран (§3.13: порядок онбординга)
+  useEffect(() => {
+    if (!serverProfile) return;
+    checkVersion();
+  }, [serverProfile]);
 
   // Обработчики пушей (§3.5) — один раз: foreground/background/onOpenApp/холодный старт
   useEffect(() => {
     if (pushRef.current) return;
     pushRef.current = true;
-    installPushHandlers();
+    void installPushHandlers();
   }, []);
 
   // PKCE-fallback (§3.2): redirect vibechat://callback приходит deep link'ом.
@@ -100,6 +108,8 @@ export default function RootLayout() {
       />
       {versionBlocked ? (
         <VersionGate min={versionMin} onRetry={checkVersion} />
+      ) : !serverProfile ? (
+        <Connect onStart={(p) => useServerProfile.getState().set(p)} />
       ) : (
         <View style={{ flex: 1 }}>
           {versionLatest && !bannerDismissed ? (

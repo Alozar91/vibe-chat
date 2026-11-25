@@ -47,11 +47,24 @@ def test_server_info_no_code(client: TestClient, monkeypatch: pytest.MonkeyPatch
     assert d["app_download_url"] == "https://x.example/app.apk"
 
 
+def test_public_keycloak_url_override(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """APP_PUBLIC_KEYCLOAK_URL перекрывает kc_url в профиле (NAT/dev), issuer — нет."""
+    s = Settings(
+        keycloak_url="http://localhost:8080",
+        public_keycloak_url="http://10.0.2.2:8080",
+        _env_file=None,
+    )
+    monkeypatch.setattr(si, "get_settings", lambda: s)
+    r = client.get("/api/v1/server/info")
+    assert r.status_code == 200
+    assert r.json()["kc_url"] == "http://10.0.2.2:8080"
+
+
 def test_join_code_required_and_accepted(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """С кодом: без заголовка 403 join_code_required, с верным — 200 (§19.5)."""
-    s = Settings(server_name="X", app_join_code="s3cret", push_driver="off", _env_file=None)
+    s = Settings(server_name="X", join_code="s3cret", push_driver="off", _env_file=None)
     monkeypatch.setattr(si, "get_settings", lambda: s)
     r = client.get("/api/v1/server/info")
     assert r.status_code == 403
@@ -68,7 +81,7 @@ def test_join_code_required_and_accepted(
 
 def test_join_rate_limit(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """>10 неуспешных за окно → 429 (§19.5)."""
-    s = Settings(app_join_code="s3cret", _env_file=None)
+    s = Settings(join_code="s3cret", _env_file=None)
     monkeypatch.setattr(si, "get_settings", lambda: s)
     for _ in range(10):
         r = client.get("/api/v1/server/info", headers={"X-Vibe-Join": "nope"})
@@ -84,7 +97,7 @@ def test_register_and_version_gated(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Фейс-контроль покрывает /auth/register и /app/version (§19.5)."""
-    s = Settings(app_join_code="s3cret", _env_file=None)
+    s = Settings(join_code="s3cret", _env_file=None)
     monkeypatch.setattr(si, "get_settings", lambda: s)
     r = client.get("/api/v1/app/version")
     assert r.status_code == 403
@@ -156,7 +169,7 @@ def test_push_fcm_with_firebase(
     f.write_text(json.dumps(cfg))
     s = Settings(
         push_driver="fcm",
-        firebase_client_config_file=str(f),
+        firebase_config_path=str(f),
         fcm_project_id="p",
         _env_file=None,
     )

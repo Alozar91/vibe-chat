@@ -52,6 +52,19 @@ export const ru = {
   "profile.notificationsOn": "Включены — настройка канала в системе",
   "profile.notificationsOff": "Отключены — включить в настройках системы",
 
+  "connect.subtitle": "Подключение к серверу",
+  "connect.urlPlaceholder": "Адрес сервера (например, chat.example.com)",
+  "connect.codePlaceholder": "Кодовое слово (если требуется сервером)",
+  "connect.submit": "Подключиться",
+  "connect.devHint": "Dev: локальный бэкенд — http://10.0.2.2:8002",
+
+  "server.current": "Сервер",
+  "server.switch": "Сменить сервер",
+  "server.switchConfirmTitle": "Сменить сервер?",
+  "server.switchConfirmText": "Вы выйдете из аккаунта, локальный кэш будет очищен. Продолжить?",
+  "server.switchConfirmOk": "Сменить",
+  "server.switchConfirmCancel": "Отмена",
+
   "version.blockedTitle": "Требуется обновление",
   "version.blockedText": "Версия приложения {own} устарела. Минимально поддерживаемая — {min}. Установите новый APK и запустите приложение снова.",
   "version.updateAvailable": "Доступна новая версия ({ver})",

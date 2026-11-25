@@ -10,7 +10,9 @@
  * текст не светим в FCM-шине; в уведомлении — название чата из кэша + count.
  */
 
+import { getApps, getApp, initializeApp } from "@react-native-firebase/app";
 import messaging, {
+  getMessaging,
   type FirebaseMessagingTypes,
 } from "@react-native-firebase/messaging";
 import { Platform } from "react-native";
@@ -21,12 +23,59 @@ import notifee, {
   EventType,
 } from "@notifee/react-native";
 import { api } from "./api-client";
+import { config } from "./config";
 import { useSession } from "../stores/session";
 import { queryClient } from "./query-client";
 import { queryKeys } from "../api/query-keys";
 import type { Chat, ChatDetail } from "../api/types";
 
 const CHANNEL_ID = "messages";
+
+/** Мессенджер активного Firebase-проекта (§19.6): наличие пушей определяет сервер,
+ * а не сборка. driver!=fcm → null (пуши не регистрируются); fcm + firebase
+ * с ЧУЖИМ project_id → рантайм-инициализация secondary-app (initializeApp —
+ * промис в RN Firebase); совпадает/конфига нет → дефолтный app (зашитый
+ * google-services.json официальной сборки). */
+async function activeMessaging(): Promise<FirebaseMessagingTypes.Module | null> {
+  const push = config.push;
+  if (push.driver !== "fcm" || !push.firebase || !push.firebase.project_id) {
+    return null;
+  }
+  const NAME = "vibe-server";
+  try {
+    const defaultOpts = getApps().length ? getApp().options : null;
+    if (!defaultOpts || defaultOpts.projectId !== push.firebase.project_id) {
+      let app = getApps().find((a) => a.name === NAME);
+      if (!app) {
+        try {
+          app = await initializeApp(
+            {
+              projectId: push.firebase.project_id,
+              apiKey: push.firebase.api_key,
+              appId: push.firebase.app_id,
+              messagingSenderId: push.firebase.sender_id,
+              storageBucket: push.firebase.storage_bucket || undefined,
+            },
+            NAME,
+          );
+        } catch (initError) {
+          // гонка инициализации: если app создал параллельный вызов — переиспользуем
+          try {
+            app = getApp(NAME);
+          } catch {
+            console.warn("[push] runtime firebase init failed, fallback to default", initError);
+            return messaging();
+          }
+        }
+      }
+      return getMessaging(app);
+    }
+  } catch (e) {
+    // не критично: fallback на дефолт; токен просто не подойдёт чужому проекту
+    console.warn("[push] firebase resolve failed, fallback to default", e);
+  }
+  return messaging();
+}
 
 /** Текущий открытый чат — его уведомления не показываем и смываем. */
 let activeChatId: string | null = null;
@@ -81,7 +130,9 @@ export async function registerPushToken(): Promise<void> {
   registerInFlight = (async () => {
     try {
       if (Platform.OS !== "android") return;
-      const token = await messaging().getToken();
+      const m = await activeMessaging();
+      if (!m) return; // сервер без пушей (§19.6) — регистрировать нечего
+      const token = await m.getToken();
       await api("/push/tokens", { method: "POST", body: { token, platform: "android" } });
     } catch (e) {
       // не критично: повтор на следующем старте / tokenRefresh
@@ -96,10 +147,12 @@ export async function registerPushToken(): Promise<void> {
 /** Отвязка токена при выходе (DELETE /push/tokens/{token}, §3.8). */
 export async function unregisterPushToken(): Promise<void> {
   if (Platform.OS !== "android") return;
+  const m = await activeMessaging();
+  if (!m) return;
   try {
-    const token = await messaging().getToken();
+    const token = await m.getToken();
     await api(`/push/tokens/${encodeURIComponent(token)}`, { method: "DELETE" });
-    await messaging().deleteToken(); // FCM перегенерирует при следующем getToken
+    await m.deleteToken(); // FCM перегенерирует при следующем getToken
   } catch (e) {
     console.warn("[push] unregister failed", e);
   }
@@ -190,11 +243,13 @@ function asString(v: unknown): string | undefined {
 
 // ── Установка всех обработчиков (один раз из корневого layout) ─────────────
 
-export function installPushHandlers(): void {
+export async function installPushHandlers(): Promise<void> {
   if (Platform.OS !== "android") return;
+  const m = await activeMessaging();
+  if (!m) return; // сервер без пушей — обработчики FCM не нужны
 
   // foreground: ленту обновляет realtime-диспетчер (дедуп §3.5) — не рисуем.
-  messaging().onMessage(() => {
+  m.onMessage(() => {
     /* no-op: WS доставил */
   });
 
@@ -208,7 +263,7 @@ export function installPushHandlers(): void {
   });
 
   // background/quit: Android будит JS — рисуем уведомление.
-  messaging().setBackgroundMessageHandler(async (message) => {
+  m.setBackgroundMessageHandler(async (message) => {
     await showMessageNotification(message);
   });
 
@@ -223,7 +278,7 @@ export function installPushHandlers(): void {
     .catch(() => {});
 
   // ротация токена на стороне FCM → перерегистрация (§3.8)
-  messaging().onTokenRefresh(() => {
+  m.onTokenRefresh(() => {
     if (useSession.getState().authenticated) void registerPushToken();
   });
 }

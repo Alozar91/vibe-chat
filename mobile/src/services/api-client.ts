@@ -35,6 +35,10 @@ async function request<T>(path: string, options: ApiOptions): Promise<T> {
     ...extraHeaders,
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  // Кодовое слово сервера (§19.5): ко всем запросам, если задан в профиле —
+  // неаутентифицированные эндпоинты (server/info, register, version) его требуют
+  const joinCode = config.joinCode;
+  if (joinCode) headers["X-Vibe-Join"] = joinCode;
   if (!accessToken && !_retried) {
     const auto = await getAccessToken();
     if (auto) headers.Authorization = `Bearer ${auto}`;

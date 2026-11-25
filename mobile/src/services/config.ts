@@ -1,49 +1,84 @@
 /**
- * Конфигурация приложения — единственная точка чтения env (Docs/android.md §3.7).
- * Всё через EXPO_PUBLIC_* (запекаются при сборке); без хардкода в рантайме.
+ * Конфигурация приложения (Docs/android.md §3.13, концепция §19): единственная
+ * точка доступа к параметрам окружения. Источник — профиль сервера (MMKV,
+ * `server-profile.ts`), полученный из GET /server/info при онбординге. Статических
+ * `EXPO_PUBLIC_*` больше нет, кроме dev-override'а LiveKit (§3.12).
  *
- * ВАЖНО: доступ к process.env — ТОЛЬКО статический (`process.env.EXPO_PUBLIC_X`).
- * babel-инлайнер Expo подставляет значения только для литеральных обращений —
- * динамический `process.env['EXPO_PUBLIC_' + name]` в release-бандле = undefined
- * (в debug его выручает рантайм-гидратация env от dev-сервера, в release её нет).
+ * Все адреса выводятся из адреса сервера: REST `{base}/api/v1`, WS `{base}/api/v1/ws`
+ * (схема ws/wss по протоколу), Keycloak — из профиля (kc_url + realm). Client id
+ * мобильного — константа продукта (`mobile`, §19.2 концепции).
+ *
+ * Геттеры бросают, если профиль не выбран, — все потребители должны жить ПОСЛЕ
+ * онбординга (роутинг это гарантирует: без профиля рендерится только connect).
  */
 
-function required(value: string | undefined, name: string): string {
-  if (!value) {
-    throw new Error(
-      `EXPO_PUBLIC_${name} не задан. Скопируйте mobile/.env.example в mobile/.env и заполните.`
-    );
+import { wsSchemeFor, useServerProfile } from "./server-profile";
+
+function requireProfile() {
+  const profile = useServerProfile.getState().profile;
+  if (!profile) {
+    throw new Error("Сервер не выбран: конфиг доступен только после онбординга");
   }
-  return value;
+  return profile;
 }
 
+/** dev-only override LiveKit (§3.12): в dev ws://10.0.2.2:7880, из эмулятора
+ * localhost не резолвится. На стенде/в self-host не задаётся — ws_url из room-токена. */
+const livekitOverride =
+  process.env.EXPO_PUBLIC_LIVEKIT_URL && process.env.EXPO_PUBLIC_LIVEKIT_URL.length > 0
+    ? process.env.EXPO_PUBLIC_LIVEKIT_URL
+    : null;
+
 export const config = {
-  apiBase: required(process.env.EXPO_PUBLIC_API_BASE, "API_BASE"),
-  wsBase: required(process.env.EXPO_PUBLIC_WS_BASE, "WS_BASE"),
-  siloPublicUrl: required(process.env.EXPO_PUBLIC_SILO_PUBLIC_URL, "SILO_PUBLIC_URL"),
-  kcUrl: required(process.env.EXPO_PUBLIC_KC_URL, "KC_URL"),
-  kcRealm: required(process.env.EXPO_PUBLIC_KC_REALM, "KC_REALM"),
-  kcClientId: required(process.env.EXPO_PUBLIC_KC_CLIENT_ID, "KC_CLIENT_ID"),
+  /** REST base: {адрес сервера}/api/v1 */
+  get apiBase(): string {
+    return `${requireProfile().baseUrl}/api/v1`;
+  },
 
-  /** LiveKit WS для звонков (§3.12): бэкенд возвращает ws_url в room-токене;
-   * в dev (ws://localhost:7880) из эмулятора не резолвится — override на
-   * ws://10.0.2.2:7880. На стенде не задан — ws_url (wss://…/chat/livekit) верен.
-   */
-  livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL || null,
+  /** WS base: та же точка монтирования, схема ws/wss по протоколу адреса */
+  get wsBase(): string {
+    const p = requireProfile();
+    return `${wsSchemeFor(p.baseUrl)}${p.baseUrl.replace(/^https?:\/\//i, "")}/api/v1/ws`;
+  },
 
-  /** Прямая ссылка на раздачу APK (§3.8): показывается на блокирующем
-   * экране устаревшей версии. Не задана — текст «обратитесь к администратору». */
-  appDownloadUrl: process.env.EXPO_PUBLIC_APP_DOWNLOAD_URL || null,
+  get kcUrl(): string {
+    return requireProfile().kcUrl;
+  },
 
-  /** OAuth endpoints Keycloak (ROPC — token endpoint, PKCE fallback — authorize) */
+  get kcRealm(): string {
+    return requireProfile().realm;
+  },
+
+  /** client id мобильного клиента — константа продукта (§19.2) */
+  kcClientId: "mobile",
+
+  /** Кодовое слово сервера (заголовок X-Vibe-Join); пусто = не задан (§19.5) */
+  get joinCode(): string | null {
+    const code = requireProfile().joinCode;
+    return code ? code : null;
+  },
+
+  /** Пуш-конфигурация сервера (§19.6): наличие пушей определяет сервер, не сборка */
+  get push() {
+    return requireProfile().push;
+  },
+
+  /** Ссылка на раздачу APK этого сервера (§3.8/§19.4); не задана — null */
+  get appDownloadUrl(): string | null {
+    return requireProfile().appDownloadUrl || null;
+  },
+
+  /** LiveKit WS для звонков: dev-override или ws_url из room-токена (§3.12) */
+  livekitUrl: livekitOverride,
+
+  /** OAuth endpoints Keycloak (ROPC — token, PKCE fallback — authorize) */
   get kc() {
+    const base = `${this.kcUrl}/realms/${this.kcRealm}`;
     return {
-      tokenEndpoint: `${this.kcUrl}/realms/${this.kcRealm}/protocol/openid-connect/token`,
-      authorizeEndpoint: `${this.kcUrl}/realms/${this.kcRealm}/protocol/openid-connect/auth`,
-      logoutEndpoint: `${this.kcUrl}/realms/${this.kcRealm}/protocol/openid-connect/logout`,
-      revocationEndpoint: `${this.kcUrl}/realms/${this.kcRealm}/protocol/openid-connect/revoke`,
+      tokenEndpoint: `${base}/protocol/openid-connect/token`,
+      authorizeEndpoint: `${base}/protocol/openid-connect/auth`,
+      logoutEndpoint: `${base}/protocol/openid-connect/logout`,
+      revocationEndpoint: `${base}/protocol/openid-connect/revoke`,
     };
   },
-} as const;
-
-export type AppConfig = typeof config;
+};

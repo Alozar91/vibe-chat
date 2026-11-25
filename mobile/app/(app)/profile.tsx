@@ -12,6 +12,12 @@ import { router } from "expo-router";
 import { usersApi } from "../../src/api/endpoints";
 import { logout } from "../../src/services/session-service";
 import { notificationsEnabled, openNotificationSettings } from "../../src/services/push-service";
+import {
+  getServerProfile,
+  serverDisplayName,
+  useServerProfile,
+  wsSchemeFor,
+} from "../../src/services/server-profile";
 import { useSession } from "../../src/stores/session";
 import { t } from "../../src/i18n/ru";
 import { theme, useThemedStyles } from "../../src/theme";
@@ -92,6 +98,33 @@ export default function ProfileScreen() {
         style: "destructive",
         onPress: () => {
           void logout().finally(() => router.replace("/login"));
+        },
+      },
+    ]);
+  };
+
+  const profile = getServerProfile();
+  const serverInfo = profile
+    ? `${serverDisplayName(profile)} — ${profile.baseUrl} (${wsSchemeFor(profile.baseUrl)}…/api/v1/ws, пушей: ${profile.push.driver})`
+    : "";
+
+  /** Смена сервера (§19.3): logout + чистка профиля → онбординг заново.
+   * router.replace("/connect") после очистки: _layout перерисуется (профиль null). */
+  const onSwitchServer = () => {
+    Alert.alert(t("server.switchConfirmTitle"), t("server.switchConfirmText"), [
+      { text: t("server.switchConfirmCancel"), style: "cancel" },
+      {
+        text: t("server.switchConfirmOk"),
+        style: "destructive",
+        onPress: () => {
+          void logout()
+            .catch(() => {})
+            .finally(() => {
+              // Порядок важен: только снимаем профиль — _layout размонтирует Stack
+              // целиком и рендерит Connect; навигацию явно не трогаем (replace
+              // без живого навигатора даёт «action REPLACE not handled»).
+              useServerProfile.getState().set(null);
+            });
         },
       },
     ]);
@@ -199,6 +232,16 @@ export default function ProfileScreen() {
             </Text>
           </Pressable>
 
+          <Text style={[styles.section, styles.label]}>{t("server.current")}</Text>
+          <View style={styles.serverRow}>
+            <Text style={styles.serverText} numberOfLines={1} ellipsizeMode="middle">
+              {serverInfo}
+            </Text>
+          </View>
+          <Pressable style={styles.serverSwitchBtn} onPress={onSwitchServer}>
+            <Text style={styles.serverSwitchText}>{t("server.switch")}</Text>
+          </Pressable>
+
           <Pressable style={styles.logoutBtn} onPress={onLogout}>
             <Text style={styles.logoutText}>{t("profile.logout")}</Text>
           </Pressable>
@@ -270,6 +313,24 @@ const useStyles = () => useThemedStyles(() => StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   notifText: { fontSize: theme.font.md, color: theme.colors.text },
+  serverRow: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.sm,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+  },
+  serverText: { fontSize: theme.font.sm, color: theme.colors.text },
+  serverSwitchBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 12,
+    marginBottom: theme.spacing.md,
+  },
+  serverSwitchText: { color: theme.colors.text, fontSize: theme.font.md },
   logoutBtn: {
     borderWidth: 1,
     borderColor: theme.colors.danger,

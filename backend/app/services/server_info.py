@@ -47,7 +47,7 @@ async def require_join_code(request: Request) -> None:
     неверный/отсутствующий → 403 join_code_required (единая ошибка — без оракула),
     >10 неуспешных за минуту с IP → 429.
     """
-    code = get_settings().app_join_code
+    code = get_settings().join_code
     if not code:
         return
 
@@ -116,10 +116,10 @@ def build_server_info() -> dict[str, object]:
     s = get_settings()
     firebase = None
     if s.push_driver == "fcm":
-        firebase = parse_firebase_client_config(s.firebase_client_config_file)
+        firebase = parse_firebase_client_config(s.firebase_config_path)
     return {
         "name": s.server_name,
-        "kc_url": s.keycloak_url,
+        "kc_url": s.public_keycloak_url or s.keycloak_url,
         "realm": s.keycloak_realm,
         "push": {"driver": s.push_driver, "firebase": firebase},
         "min_version": s.min_app_version,

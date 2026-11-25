@@ -3,9 +3,8 @@
  *
  * `GET /app/version` (без аутентификации) отдаёт `{min_version, latest_version}`.
  * Своя версия — versionName из app.json (запекается в бандл через expo-constants).
- * EXPO_PUBLIC_* для release-сборки пробрасываются В ОБОЛОЧКЕ перед gradlew
- * (`set -a; source .env; set +a`): @expo/env в export:embed не находит .env,
- * когда projectRoot резолвится от android/ — проверено на этой машине.
+ * (Release-механика: env-значения пробрасываются в оболочке перед gradlew —
+ * @expo/env в export:embed не находит .env от projectRoot android/.)
  * `min_version` пуст или сервер недоступен → гейт открыт (fail-open: если
  * бэкенда нет, блокировать приложение нечем и незачем). Сравнение —
  * семантическое по versionName; versionCode монотонный, но не участвует
