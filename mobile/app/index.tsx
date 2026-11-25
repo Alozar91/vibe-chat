@@ -9,11 +9,13 @@ import { router } from "expo-router";
 import { runDiagnostics, type DiagnosticsResult } from "../src/services/diagnostics";
 import { useSession } from "../src/stores/session";
 import { restoreSession } from "../src/services/session-service";
+import { theme, useThemedStyles } from "../src/theme";
 
 export default function Index() {
   const authenticated = useSession((s) => s.authenticated);
   const restoring = useSession((s) => s.restoring);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
+  const styles = useStyles();
 
   useEffect(() => {
     runDiagnostics().then(setDiagnostics);
@@ -54,11 +56,11 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 8 },
-  title: { fontSize: 28, fontWeight: "700", marginBottom: 16 },
-  hint: { fontSize: 13, opacity: 0.6 },
-  ok: { fontSize: 14, color: "#2e7d32" },
-  error: { fontSize: 14, color: "#c62828", textAlign: "center" },
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 8, backgroundColor: theme.colors.background },
+  title: { fontSize: 28, fontWeight: "700", marginBottom: 16, color: theme.colors.text },
+  hint: { fontSize: 13, opacity: 0.6, color: theme.colors.textSecondary },
+  ok: { fontSize: 14, color: theme.colors.accentGreen },
+  error: { fontSize: 14, color: theme.colors.danger, textAlign: "center" },
   spinner: { marginTop: 12 },
-});
+}));

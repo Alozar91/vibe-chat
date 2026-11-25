@@ -14,13 +14,18 @@ import { logout } from "../../src/services/session-service";
 import { notificationsEnabled, openNotificationSettings } from "../../src/services/push-service";
 import { useSession } from "../../src/stores/session";
 import { t } from "../../src/i18n/ru";
-import { theme } from "../../src/theme";
+import { theme, useThemedStyles } from "../../src/theme";
 import type { TimeDisplay } from "../../src/api/types";
 import { InviteAdminSection } from "../../src/components/invite-admin-section";
+import { applyTheme, useThemeStore, type ThemeMode } from "../../src/theme";
 
 const TIME_DISPLAYS: TimeDisplay[] = ["browser", "as_sent", "fixed", "utc"];
+const THEME_MODES: ThemeMode[] = ["light", "dark", "system"];
+const THEME_KEY = { light: "light", dark: "dark", system: "system" } as const;
 
 export default function ProfileScreen() {
+  const styles = useStyles();
+  const themeMode = useThemeStore((s) => s.mode);
   const sessionUser = useSession((s) => s.user);
   const [displayName, setDisplayName] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -164,6 +169,21 @@ export default function ProfileScreen() {
             />
           ) : null}
 
+          <Text style={[styles.section, styles.label]}>{t("profile.theme")}</Text>
+          <View style={styles.chips}>
+            {THEME_MODES.map((mode) => (
+              <Pressable
+                key={mode}
+                style={[styles.chip, themeMode === mode && styles.chipActive]}
+                onPress={() => applyTheme(mode)}
+              >
+                <Text style={[styles.chipText, themeMode === mode && styles.chipTextActive]}>
+                  {t(`theme.${THEME_KEY[mode]}` as const)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           <Pressable style={styles.saveBtn} onPress={() => void onSave()} disabled={saving}>
             <Text style={styles.saveBtnText}>{saving ? t("profile.saving") : t("profile.save")}</Text>
           </Pressable>
@@ -188,7 +208,7 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: {
     flexDirection: "row",
@@ -259,4 +279,4 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xl,
   },
   logoutText: { color: theme.colors.danger, fontSize: theme.font.md, fontWeight: "500" },
-});
+}));

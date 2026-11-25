@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { register, registerErrorText } from "../src/services/register-service";
+import { theme, useThemedStyles } from "../src/theme";
 
 export default function Register() {
   const [inviteCode, setInviteCode] = useState("");
@@ -26,6 +27,7 @@ export default function Register() {
   const [password2, setPassword2] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const styles = useStyles();
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -118,28 +120,29 @@ export default function Register() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
+  flex: { flex: 1, backgroundColor: theme.colors.background },
   container: { flexGrow: 1, justifyContent: "center", padding: 24, gap: 12 },
-  title: { fontSize: 28, fontWeight: "700", textAlign: "center", marginBottom: 16 },
+  title: { fontSize: 28, fontWeight: "700", textAlign: "center", marginBottom: 16, color: theme.colors.text },
   input: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: theme.colors.border,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: "#fff",
+    backgroundColor: theme.colors.background,
+    color: theme.colors.text,
   },
   button: {
-    backgroundColor: "#2563eb",
+    backgroundColor: theme.colors.primary,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 8,
   },
   buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c62828", fontSize: 14, textAlign: "center" },
-  link: { color: "#2563eb", fontSize: 15, textAlign: "center", marginTop: 8 },
-});
+  buttonText: { color: theme.colors.primaryText, fontSize: 16, fontWeight: "600" },
+  error: { color: theme.colors.danger, fontSize: 14, textAlign: "center" },
+  link: { color: theme.colors.primary, fontSize: 15, textAlign: "center", marginTop: 8 },
+}));

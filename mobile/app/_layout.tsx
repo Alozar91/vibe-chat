@@ -10,6 +10,7 @@ import { installRealtimeSync } from "../src/services/realtime-sync";
 import { wsClient } from "../src/services/ws-client";
 import { useSession } from "../src/stores/session";
 import { useRealtime } from "../src/stores/realtime";
+import { useThemeStore } from "../src/theme";
 import { handlePkceRedirect } from "../src/services/session-service";
 import { installPushHandlers } from "../src/services/push-service";
 
@@ -17,6 +18,7 @@ const persister = createQueryPersister(storage);
 
 export default function RootLayout() {
   const authenticated = useSession((s) => s.authenticated);
+  const resolvedTheme = useThemeStore((s) => s.resolved);
   const syncRef = useRef(false);
   const pushRef = useRef(false);
 
@@ -68,7 +70,10 @@ export default function RootLayout() {
         buster: "",
       }}
     >
-      <StatusBar style="auto" />
+      <StatusBar
+        style={resolvedTheme === "dark" ? "light" : "dark"}
+        backgroundColor={resolvedTheme === "dark" ? "#09090b" : "#ffffff"}
+      />
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ title: "Вход" }} />

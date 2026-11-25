@@ -10,19 +10,21 @@ import { useMemo } from "react";
 import { useChats, useChatDetail } from "../../src/hooks/use-chats";
 import { useSession } from "../../src/stores/session";
 import { useRealtime } from "../../src/stores/realtime";
-import { theme } from "../../src/theme";
+import { theme, useThemedStyles } from "../../src/theme";
 import { t } from "../../src/i18n/ru";
 import type { Chat } from "../../src/api/types";
 
 /** presence-точка: online из WS (presence), fallback — ничего (§9). */
 function PresenceDot({ userId }: { userId: string }) {
   const online = useRealtime((s) => s.online[userId]?.online);
+  const styles = useStyles();
   if (!online) return null;
   return <View style={styles.presenceDot} />;
 }
 
 /** Заголовок чата: group → title; direct → имя собеседника (детали чата). */
 function ChatTitle({ chat, myId }: { chat: Chat; myId: string | null }) {
+  const styles = useStyles();
   const detail = useChatDetail(chat.id);
   const title = useMemo(() => {
     if (chat.type === "group") return chat.title ?? t("chats.title");
@@ -41,6 +43,7 @@ function ChatTitle({ chat, myId }: { chat: Chat; myId: string | null }) {
 }
 
 function ChatListItem({ chat, myId }: { chat: Chat; myId: string | null }) {
+  const styles = useStyles();
   return (
     <Pressable
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.colors.surfaceActive }]}
@@ -67,6 +70,7 @@ function ChatListItem({ chat, myId }: { chat: Chat; myId: string | null }) {
 }
 
 export default function ChatsScreen() {
+  const styles = useStyles();
   const myId = useSession((s) => s.user?.id ?? null);
   const chats = useChats();
   const status = useRealtime((s) => s.status);
@@ -107,6 +111,7 @@ export default function ChatsScreen() {
 }
 
 function FlatListLike({ chats, myId }: { chats: Chat[]; myId: string | null }) {
+  const styles = useStyles();
   return (
     <FlatList
       data={chats}
@@ -117,7 +122,7 @@ function FlatListLike({ chats, myId }: { chats: Chat[]; myId: string | null }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: {
     flexDirection: "row",
@@ -182,4 +187,4 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: theme.colors.primaryText, fontSize: theme.font.sm },
   separator: { height: 1, backgroundColor: theme.colors.border },
-});
+}));

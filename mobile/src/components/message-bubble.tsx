@@ -10,7 +10,7 @@ import type { Attachment, LocalMessage, Message } from "../api/types";
 import { useCachedMedia } from "../hooks/use-cached-media";
 import { useRetryMessage } from "../hooks/use-send-message";
 import { t } from "../i18n/ru";
-import { theme } from "../theme";
+import { theme, useThemedStyles } from "../theme";
 
 /** Имя эмодзи → символ (API хранит имена, §6; как EMOJI у веба) */
 export const EMOJI_CHAR: Record<string, string> = {
@@ -22,6 +22,7 @@ export const EMOJI_CHAR: Record<string, string> = {
 };
 
 function AttachmentImage({ att }: { att: Attachment }) {
+  const styles = useStyles();
   // thumb (§8) — всегда для image; blurhash-рендер отложен (нужна нативная
   // библиотека), плейсхолдер — surface (решение зафиксировано в Docs)
   const uri = useCachedMedia(att.file_id, att.thumb_url ?? att.url);
@@ -34,6 +35,7 @@ function AttachmentImage({ att }: { att: Attachment }) {
 }
 
 function AttachmentFileRow({ att }: { att: Attachment }) {
+  const styles = useStyles();
   return (
     <View style={styles.attFileRow}>
       <Text style={styles.attFileIcon}>📎</Text>
@@ -57,6 +59,7 @@ export function MessageBubble({
   onPressAttachment?: (att: Attachment) => void;
   onLongPress?: () => void;
 }) {
+  const styles = useStyles();
   const retry = useRetryMessage(message.chat_id);
   const local = message as LocalMessage;
 
@@ -129,6 +132,7 @@ export function MessageBubble({
 }
 
 function MetaStatus({ message }: { message: Message | LocalMessage }) {
+  const styles = useStyles();
   const status = (message as LocalMessage).status;
   if (status === "sending") {
     return <Text style={styles.meta}>{t("chat.statusSending")}</Text>;
@@ -153,6 +157,7 @@ export function ImageViewer({
   images?: string[];
   onClose: () => void;
 }) {
+  const styles = useStyles();
   // локальный uri поверх пропа: свайп не перезаписывается родителем до onClose
   const [navUri, setNavUri] = useState<string | null>(null);
   const current = navUri ?? uri;
@@ -208,7 +213,7 @@ export function ImageViewer({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   bubbleRow: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -318,4 +323,4 @@ const styles = StyleSheet.create({
   viewerNavBtn: { padding: theme.spacing.md },
   viewerNavText: { color: "#fff", fontSize: 32, lineHeight: 38 },
   viewerCounter: { color: "#fff", fontSize: theme.font.sm },
-});
+}));

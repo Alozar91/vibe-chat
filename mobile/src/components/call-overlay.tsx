@@ -27,7 +27,7 @@ import { queryKeys } from "../api/query-keys";
 import { t } from "../i18n/ru";
 import { useCalls } from "../stores/calls";
 import { useSession } from "../stores/session";
-import { theme } from "../theme";
+import { theme, useThemedStyles } from "../theme";
 
 /** Тик раз в секунду для таймера звонка. */
 function useTick(): number {
@@ -51,6 +51,7 @@ function buzz(): void {
 }
 
 export function CallOverlay() {
+  const styles = useStyles();
   const call = useCalls((s) => s.current);
   const media = useCalls((s) => s.media);
   const muted = useCalls((s) => s.muted);
@@ -219,6 +220,7 @@ function RingCard(props: {
   reject: () => void;
   cancel: () => void;
 }) {
+  const styles = useStyles();
   return (
     <View style={styles.ringBackdrop} pointerEvents="auto">
       <View style={styles.ringCard}>
@@ -272,6 +274,7 @@ function VideoTile(props: {
   style?: object;
   isSelf?: boolean;
 }) {
+  const styles = useStyles();
   if (props.track) {
     return (
       <View style={[styles.tile, props.style]}>
@@ -333,6 +336,7 @@ function ActiveVideo(props: {
   toggleSpeaker: () => void;
   leave: () => void;
 }) {
+  const styles = useStyles();
   // плитки: своя первая, потом участники с participant_ids (как в аудио-панели)
   const tiles = useMemo(() => {
     const list: { id: string; name: string; track: VideoTrack | null; self: boolean }[] = [
@@ -457,6 +461,7 @@ function DraggablePip(props: {
   insetsBottom: number;
   onSwap: () => void;
 }) {
+  const styles = useStyles();
   const W = 110;
   const H = 165;
   const MARGIN = 16;
@@ -515,6 +520,7 @@ function DraggablePip(props: {
 
 /** Шапка поверх видео: имя, статус-точка, таймер. */
 function VideoHeader(props: { peerLabel: string; media: string; duration: number; insetsTop: number }) {
+  const styles = useStyles();
   return (
     <View style={[styles.videoHeader, { top: props.insetsTop + 8 }]} pointerEvents="none">
       <View style={[styles.statusDot, { backgroundColor: props.media === "connected" ? theme.colors.accentGreen : "#eab308" }]} />
@@ -541,6 +547,7 @@ function VideoControls(props: {
   toggleSpeaker: () => void;
   leave: () => void;
 }) {
+  const styles = useStyles();
   return (
     <View style={[styles.videoControls, { bottom: props.insetsBottom + 24 }]}>
       <Pressable
@@ -593,6 +600,7 @@ function ActivePanel(props: {
   toggleSpeaker: () => void;
   leave: () => void;
 }) {
+  const styles = useStyles();
   return (
     <View style={[styles.activePanel, { bottom: props.insetsBottom + 16 }]} pointerEvents="box-none">
       <View
@@ -631,7 +639,7 @@ function ActivePanel(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   overlayRoot: { flex: 1 },
   ringBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -858,4 +866,4 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.sm,
   },
   errorText: { color: "#fff", fontSize: theme.font.sm, textAlign: "center" },
-});
+}));

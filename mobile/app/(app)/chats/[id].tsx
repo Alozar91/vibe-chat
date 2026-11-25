@@ -27,7 +27,7 @@ import {
   uploadFile,
 } from "../../../src/services/upload";
 import { t } from "../../../src/i18n/ru";
-import { theme } from "../../../src/theme";
+import { theme, useThemedStyles } from "../../../src/theme";
 import type { Attachment, Message } from "../../../src/api/types";
 
 /** Локальное вложение композера: загрузка в Silo до отправки сообщения. */
@@ -42,6 +42,7 @@ interface PendingAttachment {
 }
 
 export default function ChatScreen() {
+  const styles = useStyles();
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
   const myId = useSession((s) => s.user?.id ?? null);
   const detail = useChatDetail(chatId);
@@ -443,7 +444,7 @@ export default function ChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: {
     flexDirection: "row",
@@ -542,4 +543,4 @@ const styles = StyleSheet.create({
   },
   menuActionIcon: { fontSize: 14, marginRight: 4, color: theme.colors.text },
   menuActionText: { fontSize: theme.font.sm, color: theme.colors.text },
-});
+}));

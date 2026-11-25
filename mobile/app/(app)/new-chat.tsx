@@ -14,7 +14,7 @@ import { queryKeys } from "../../src/api/query-keys";
 import { useSession } from "../../src/stores/session";
 import { useDebounced } from "../../src/hooks/use-debounced";
 import { t } from "../../src/i18n/ru";
-import { theme } from "../../src/theme";
+import { theme, useThemedStyles } from "../../src/theme";
 import type { User } from "../../src/api/types";
 
 function UserRow({
@@ -26,6 +26,7 @@ function UserRow({
   selected?: boolean;
   onPress: () => void;
 }) {
+  const styles = useStyles();
   return (
     <Pressable style={[styles.row, selected && styles.rowSelected]} onPress={onPress}>
       <View style={styles.avatar}>
@@ -43,6 +44,7 @@ function UserRow({
 }
 
 export default function NewChatScreen() {
+  const styles = useStyles();
   const meId = useSession((s) => s.user?.id ?? null);
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"direct" | "group">("direct");
@@ -172,7 +174,7 @@ export default function NewChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: {
     flexDirection: "row",
@@ -267,4 +269,4 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.4 },
   createBtnText: { color: theme.colors.primaryText, fontSize: theme.font.md, fontWeight: "500" },
-});
+}));

@@ -11,7 +11,7 @@ import { chatsApi, messagesApi } from "../api/endpoints";
 import { useChatDetail } from "../hooks/use-chats";
 import { useSession } from "../stores/session";
 import { t } from "../i18n/ru";
-import { theme } from "../theme";
+import { theme, useThemedStyles } from "../theme";
 import type { Chat, Message } from "../api/types";
 
 /** Заголовок чата в диалоге (как ChatListItem: direct → имя собеседника). */
@@ -26,6 +26,7 @@ function ChatRow({
   selected: boolean;
   onToggle: () => void;
 }) {
+  const styles = useStyles();
   const detail = useChatDetail(chat.id);
   const title =
     chat.type === "group"
@@ -46,6 +47,7 @@ function ChatRow({
 }
 
 export function ForwardDialog({ message, onClose }: { message: Message; onClose: () => void }) {
+  const styles = useStyles();
   const meId = useSession((s) => s.user?.id ?? null);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
@@ -104,7 +106,7 @@ export function ForwardDialog({ message, onClose }: { message: Message; onClose:
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center" },
   dialog: {
     alignSelf: "center",
@@ -160,4 +162,4 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { opacity: 0.4 },
   sendBtnText: { color: theme.colors.primaryText, fontSize: theme.font.md, fontWeight: "500" },
-});
+}));

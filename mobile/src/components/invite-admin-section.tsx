@@ -7,9 +7,10 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invitesApi } from "../api/endpoints";
 import { t } from "../i18n/ru";
-import { theme } from "../theme";
+import { theme, useThemedStyles } from "../theme";
 
 export function InviteAdminSection() {
+  const styles = useStyles();
   const queryClient = useQueryClient();
   const invites = useQuery({ queryKey: ["invites"], queryFn: invitesApi.list });
 
@@ -66,7 +67,7 @@ export function InviteAdminSection() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   section: {
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -97,4 +98,4 @@ const styles = StyleSheet.create({
   deactivated: { fontSize: theme.font.sm, color: theme.colors.textSecondary },
   deactivateBtn: { color: theme.colors.danger, fontSize: theme.font.sm },
   empty: { color: theme.colors.textSecondary, fontSize: theme.font.sm, marginTop: theme.spacing.sm },
-});
+}));

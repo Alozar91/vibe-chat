@@ -18,8 +18,12 @@ import notifee, { EventType } from "@notifee/react-native";
 import { registerGlobals } from "@livekit/react-native";
 
 import { handlePushDeepLink, showMessageNotification } from "./src/services/push-service";
+import { initTheme } from "./src/theme";
 
 registerGlobals();
+
+// Тема до первого рендера (§3.10): MMKV-настройка + listener system-режима
+initTheme();
 
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
   await showMessageNotification(remoteMessage);

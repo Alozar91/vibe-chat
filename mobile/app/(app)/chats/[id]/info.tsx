@@ -12,10 +12,11 @@ import { chatsApi } from "../../../../src/api/endpoints";
 import { queryKeys } from "../../../../src/api/query-keys";
 import { useSession } from "../../../../src/stores/session";
 import { t } from "../../../../src/i18n/ru";
-import { theme } from "../../../../src/theme";
+import { theme, useThemedStyles } from "../../../../src/theme";
 import type { ChatMember, MemberRole } from "../../../../src/api/types";
 
 function MemberRow({ member, meId }: { member: ChatMember; meId: string | null }) {
+  const styles = useStyles();
   const roleLabel = t(`info.role.${member.role}` as const);
   return (
     <View style={styles.row}>
@@ -35,6 +36,7 @@ function MemberRow({ member, meId }: { member: ChatMember; meId: string | null }
 }
 
 export default function ChatInfoScreen() {
+  const styles = useStyles();
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
   const meId = useSession((s) => s.user?.id ?? null);
   const queryClient = useQueryClient();
@@ -134,7 +136,7 @@ export default function ChatInfoScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = () => useThemedStyles(() => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: {
     flexDirection: "row",
@@ -216,4 +218,4 @@ const styles = StyleSheet.create({
     margin: theme.spacing.lg,
   },
   leaveText: { color: theme.colors.danger, fontSize: theme.font.md, fontWeight: "500" },
-});
+}));
