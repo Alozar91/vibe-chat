@@ -328,7 +328,7 @@ export function CallOverlay() {
                     <PhoneOff className="size-6" />
                   </button>
                   <button
-                    onClick={() => void accept()}
+                    onClick={() => void accept(true)}
                     title="Ответить"
                     className="flex size-14 items-center justify-center rounded-full bg-green-600 text-white hover:bg-green-500"
                   >
@@ -337,6 +337,15 @@ export function CallOverlay() {
                 </>
               )}
             </div>
+            {/* видео-звонок: альтернативный ответ только со звуком (§17, паритет с мобильным) */}
+            {isVideo && !isInitiator && (
+              <button
+                onClick={() => void accept(false)}
+                className="mt-4 w-full rounded-full border border-border px-3 py-2 text-xs text-muted hover:bg-surface"
+              >
+                Ответить без видео
+              </button>
+            )}
           </div>
         </div>
       </>

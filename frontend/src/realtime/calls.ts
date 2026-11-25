@@ -29,7 +29,7 @@ interface CallsState {
   handleWsEvent: (e: WsEvent) => void
   start: (chatId: string, kind?: 'audio' | 'video') => Promise<void>
   join: (callId: string) => Promise<void>
-  accept: () => Promise<void>
+  accept: (withVideo?: boolean) => Promise<void>
   reject: () => Promise<void>
   cancel: () => Promise<void>
   leave: () => Promise<void>
@@ -126,7 +126,7 @@ export const useCallsStore = create<CallsState>((set, get) => ({
     }
   },
 
-  accept: async () => {
+  accept: async (withVideo = true) => {
     const call = get().current
     if (!call) return
     set({ error: null })
@@ -134,7 +134,7 @@ export const useCallsStore = create<CallsState>((set, get) => ({
       const updated = await callsApi.accept(call.id)
       set({ current: updated })
       syncRingtone()
-      await connectMedia()
+      await connectMedia(withVideo)
     } catch (err) {
       set({ error: errMessage(err) })
     }
@@ -185,8 +185,13 @@ export const useCallsStore = create<CallsState>((set, get) => ({
     const room = get().room
     if (!room) return
     const next = !get().camOn
-    await room.localParticipant.setCameraEnabled(next)
-    set({ camOn: next, videoVersion: get().videoVersion + 1 })
+    try {
+      await room.localParticipant.setCameraEnabled(next)
+      set({ camOn: next, videoVersion: get().videoVersion + 1 })
+    } catch {
+      // браузер отказал в камере (например, после «ответить без видео»)
+      set({ error: 'камера недоступна — только звук' })
+    }
   },
 
   toggleScreen: async () => {
@@ -219,7 +224,7 @@ function errMessage(err: unknown): string {
 
 // --- LiveKit-подключение (медиа, §17) ---
 
-async function connectMedia(): Promise<void> {
+async function connectMedia(withVideo = true): Promise<void> {
   const { current, room } = useCallsStore.getState()
   if (!current || room) return // уже подключены (инициатор подключается на start)
   useCallsStore.setState({ media: 'connecting' })
@@ -258,7 +263,7 @@ async function connectMedia(): Promise<void> {
     })
     await lkRoom.connect(ws_url, token)
     await lkRoom.localParticipant.setMicrophoneEnabled(true)
-    const camWanted = useCallsStore.getState().current?.kind === 'video'
+    const camWanted = useCallsStore.getState().current?.kind === 'video' && withVideo
     let camOn = false
     if (camWanted) {
       try {
