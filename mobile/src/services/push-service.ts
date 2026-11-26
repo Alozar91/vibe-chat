@@ -11,10 +11,7 @@
  */
 
 import { deleteApp, getApps, getApp, initializeApp } from "@react-native-firebase/app";
-import messaging, {
-  getMessaging,
-  type FirebaseMessagingTypes,
-} from "@react-native-firebase/messaging";
+import messaging, { type FirebaseMessagingTypes } from "@react-native-firebase/messaging";
 import { Platform } from "react-native";
 import notifee, {
   AndroidImportance,
@@ -49,7 +46,59 @@ const SECONDARY_APP_NAME = "vibe-server";
  * google-services.json официального проекта, может получить инертный токен
  * (отправить по нему нельзя без SA-ключа) — только кросс-серверная корреляция
  * устройства. */
-async function activeMessaging(): Promise<FirebaseMessagingTypes.Module | null> {
+/** Минимальная поверхность messaging, используемая push-сервисом. */
+interface PushMessaging {
+  getToken(): Promise<string>;
+  deleteToken(): Promise<void>;
+  onMessage(listener: (m: FirebaseMessagingTypes.RemoteMessage) => void): () => void;
+  onTokenRefresh(listener: (token: string) => void): () => void;
+  setBackgroundMessageHandler(
+    handler: (m: FirebaseMessagingTypes.RemoteMessage) => Promise<void>,
+  ): void;
+}
+
+/** Адаптер secondary-app (сервер со СВОИМ Firebase-проектом, §19.6).
+ *
+ * RNFB блокирует getMessaging(не-[DEFAULT]) на JS-уровне (hasMultiAppSupport:
+ * false в реестре namespace — пропатчить нельзя, реестр не экспортируется),
+ * но нативный слой per-app поддерживает: getToken/deleteToken принимают
+ * override {appName, senderId} (namespaced.js → FirebaseApp.getInstance(appName)
+ * .get(FirebaseMessaging.class)); события (onMessage/tokenRefresh/headless)
+ * app-агностичны — сериализатор не кладёт appName в событие, подписка без
+ * фильтра, поэтому слушатели дефолтного инстанса получают и чужие сообщения.
+ * Токен-ротация вторичного app в onNewToken не различима (событие без appName)
+ * — приемлемо: перерегистрация происходит при каждом логине/переподключении. */
+class SecondaryMessaging implements PushMessaging {
+  constructor(
+    private base: FirebaseMessagingTypes.Module,
+    private senderId: string,
+  ) {}
+
+  /** Токен ПРОЕКТА СЕРВЕРА (override appName), не дефолтного. */
+  getToken(): Promise<string> {
+    return this.base.getToken({ appName: SECONDARY_APP_NAME, senderId: this.senderId });
+  }
+
+  deleteToken(): Promise<void> {
+    return this.base.deleteToken({ appName: SECONDARY_APP_NAME, senderId: this.senderId });
+  }
+
+  onMessage(listener: (m: FirebaseMessagingTypes.RemoteMessage) => void): () => void {
+    return this.base.onMessage(listener);
+  }
+
+  onTokenRefresh(listener: (token: string) => void): () => void {
+    return this.base.onTokenRefresh(listener);
+  }
+
+  setBackgroundMessageHandler(
+    handler: (m: FirebaseMessagingTypes.RemoteMessage) => Promise<void>,
+  ): void {
+    this.base.setBackgroundMessageHandler(handler);
+  }
+}
+
+async function activeMessaging(): Promise<PushMessaging | null> {
   const push = config.push;
   if (push.driver !== "fcm") return null;
   const fb = push.firebase;
@@ -71,17 +120,23 @@ async function activeMessaging(): Promise<FirebaseMessagingTypes.Module | null> 
             apiKey: fb.api_key,
             appId: fb.app_id,
             messagingSenderId: fb.sender_id,
-            storageBucket: fb.storage_bucket || undefined,
+            // модульный initializeApp валидирует опции ЖЁСТКО: databaseURL и
+            // storageBucket обязательны (node_modules RNFB registry/app.js),
+            // но в google-services.json databaseURL не бывает — синтезируем
+            // канонический дефолт RTDB (не используется, только для валидации)
+            databaseURL: `https://${fb.project_id}-default-rtdb.firebaseio.com`,
+            storageBucket: fb.storage_bucket || `${fb.project_id}.appspot.com`,
           },
           SECONDARY_APP_NAME,
         );
       } catch (initError) {
-        // гонка инициализации: если app создал параллельный вызов — переиспользуем
+        // гонка инициализации: если app создал параллельный вызов — переиспользуем;
+        // если create реально упал — наружу (внешний catch отключит пуши)
+        console.warn("[push] secondary initializeApp failed", initError);
         app = getApp(SECONDARY_APP_NAME);
-        void initError;
       }
     }
-    return getMessaging(app);
+    return new SecondaryMessaging(messaging(), fb.sender_id);
   } catch (e) {
     console.warn("[push] конфиг firebase сервера нерабочий — пуши отключены", e);
     return null;
