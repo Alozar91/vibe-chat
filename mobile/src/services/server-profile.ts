@@ -105,7 +105,11 @@ export function normalizeServerUrl(raw: string): string {
     throw new ConnectError("Некорректный адрес сервера");
   }
   if (parsed.protocol === "http:") {
-    if (!__DEV__) throw new ConnectError("Поддерживаются только https:// адреса");
+    // http в релизе запрещён, КРОМЕ dev-адресов — зеркалит cleartext-исключения
+    // NSC (эмулятор 10.0.2.2 и localhost; в дикой природе не встречаются) —
+    // иначе release-сборку нельзя смоукить против dev-бэкенда
+    const devHost = ["localhost", "10.0.2.2"].includes(parsed.hostname);
+    if (!__DEV__ && !devHost) throw new ConnectError("Поддерживаются только https:// адреса");
   }
   if (!parsed.hostname.includes(".")) {
     // голый hostname без точки (кроме localhost/dev) — почти наверняка опечатка
