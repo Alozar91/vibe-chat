@@ -55,6 +55,18 @@ services:
       APP_OPEN_REGISTRATION: ${APP_OPEN_REGISTRATION:-false}
       # seed платформенного админа (python -m app.scripts.seed_admin, §13)
       SEED_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      # Пуши (§18, §19.6): серверная возможность; off = FCM-токены не принимаются.
+      # Для fcm нужны два файла (mount'ы ниже): SA-ключ проекта (секрет, deploy/secrets/,
+      # НЕ в git — хостер кладёт свой) и google-services.json КЛИЕНТА (публичные
+      # идентификаторы; хостер регистрирует пакет ru.vibe.chat.app в СВОЁМ проекте).
+      APP_PUSH_DRIVER: ${APP_PUSH_DRIVER:-off}
+      APP_FCM_CREDENTIALS_FILE: /srv/secrets/firebase-sa.json
+      APP_FCM_PROJECT_ID: ${APP_FCM_PROJECT_ID:-}
+      APP_FIREBASE_CONFIG_PATH: /srv/secrets/google-services.json
+      # Версии мобильного клиента (§3.8 этап 8): min — блокирующий гейт,
+      # latest — неблокирующий баннер «доступна новая версия»
+      APP_MIN_APP_VERSION: ${APP_MIN_APP_VERSION:-}
+      APP_LATEST_APP_VERSION: ${APP_LATEST_APP_VERSION:-}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
       interval: 10s
@@ -71,6 +83,13 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:8002:8000"  # debug-порт; kb-api тоже на 8001 → здесь 8002. Роутинг — через frontend-контейнер (docker-сеть), хост-порт не участвует
+    volumes:
+      # Пуши (§19.6): SA-ключ — секрет хостера (deploy/secrets/, вне git);
+      # клиентский конфиг — публичные идентификаторы из репозитория.
+      # Файлы могут отсутствовать (тогда compose создаст каталоги-пустышки —
+      # бэкенд это переваривает: чтение падает → пуши отключены, не 5xx).
+      - ./secrets/firebase-sa.json:/srv/secrets/firebase-sa.json:ro
+      - ../mobile/android/google-services.json:/srv/secrets/google-services.json:ro
 
   postgres:
     image: postgres:18
