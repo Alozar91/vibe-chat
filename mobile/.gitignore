@@ -3,7 +3,11 @@ node_modules/
 dist/
 *.log
 .env
-google-services.json
+# Официальный google-services.json — коммитится принудительно (git add -f):
+# НЕ секрет (публичные идентификаторы, они и так в каждом APK), а серверный
+# compose монтирует его в backend для /server/info (§19.6) — деплой должен
+# быть воспроизводимым без ручного scp.
+!google-services.json
 # spike/локальные конфиги чужих Firebase-проектов (self-host тесты, §19.6)
 android/google-service.*.json
 

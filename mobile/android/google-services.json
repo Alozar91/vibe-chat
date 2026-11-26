@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "979973424210",
+    "project_id": "vibe-chat-dd201",
+    "storage_bucket": "vibe-chat-dd201.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:979973424210:android:3fd234217da686b9ce8b8b",
+        "android_client_info": {
+          "package_name": "ru.vibe.chat.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJ3WTGwG6bQVWDliVm19O9LF9ARgxBKmQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
