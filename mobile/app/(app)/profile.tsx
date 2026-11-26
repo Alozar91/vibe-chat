@@ -11,7 +11,11 @@ import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import { usersApi } from "../../src/api/endpoints";
 import { logout } from "../../src/services/session-service";
-import { notificationsEnabled, openNotificationSettings } from "../../src/services/push-service";
+import {
+  notificationsEnabled,
+  openNotificationSettings,
+  resetSecondaryFirebaseApp,
+} from "../../src/services/push-service";
 import {
   getServerProfile,
   serverDisplayName,
@@ -124,6 +128,7 @@ export default function ProfileScreen() {
               // целиком и рендерит Connect; навигацию явно не трогаем (replace
               // без живого навигатора даёт «action REPLACE not handled»).
               useServerProfile.getState().set(null);
+              void resetSecondaryFirebaseApp(); // secondary-app СТАРОГО сервера — убить
             });
         },
       },

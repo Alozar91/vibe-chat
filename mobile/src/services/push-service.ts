@@ -10,7 +10,7 @@
  * текст не светим в FCM-шине; в уведомлении — название чата из кэша + count.
  */
 
-import { getApps, getApp, initializeApp } from "@react-native-firebase/app";
+import { deleteApp, getApps, getApp, initializeApp } from "@react-native-firebase/app";
 import messaging, {
   getMessaging,
   type FirebaseMessagingTypes,
@@ -30,51 +30,71 @@ import { queryKeys } from "../api/query-keys";
 import type { Chat, ChatDetail } from "../api/types";
 
 const CHANNEL_ID = "messages";
+const SECONDARY_APP_NAME = "vibe-server";
 
 /** Мессенджер активного Firebase-проекта (§19.6): наличие пушей определяет сервер,
- * а не сборка. driver!=fcm → null (пуши не регистрируются); fcm + firebase
- * с ЧУЖИМ project_id → рантайм-инициализация secondary-app (initializeApp —
- * промис в RN Firebase); совпадает/конфига нет → дефолтный app (зашитый
- * google-services.json официальной сборки). */
+ * а не сборка. FCM-токен — АДРЕС устройства, не учётка: отправить пуш по нему может
+ * только держатель серверных кредов (SA-ключ) владеющего проекта; клиент креды
+ * никогда не передаёт. Поэтому клиент консервативен:
+ *  - driver != fcm → null (пуши выключены сервером);
+ *  - сервер не назвал свой project_id (firebase=null) → null — токен официального
+ *    проекта чужому серверу не выдаётся;
+ *  - project_id совпал с зашитым (официальный проект) → дефолтный app;
+ *  - другой project_id → secondary-app с конфигом СЕРВЕРА (initializeApp — промис
+ *    в RN Firebase); токен принадлежит проекту сервера, слать может только он
+ *    (его SA-ключ);
+ *  - конфиг сервера битый/не инициализируется → null, НИКОГДА fallback на дефолт
+ *    (иначе чужой сервер получил бы токен официального проекта).
+ * Остаточный риск (осознанно принят, §19.6): сервер, скопировавший ПУБЛИЧНЫЙ
+ * google-services.json официального проекта, может получить инертный токен
+ * (отправить по нему нельзя без SA-ключа) — только кросс-серверная корреляция
+ * устройства. */
 async function activeMessaging(): Promise<FirebaseMessagingTypes.Module | null> {
   const push = config.push;
-  if (push.driver !== "fcm" || !push.firebase || !push.firebase.project_id) {
+  if (push.driver !== "fcm") return null;
+  const fb = push.firebase;
+  if (!fb?.project_id) {
+    console.warn("[push] сервер объявил fcm без firebase-конфига — пуши отключены");
     return null;
   }
-  const NAME = "vibe-server";
   try {
     const defaultOpts = getApps().length ? getApp().options : null;
-    if (!defaultOpts || defaultOpts.projectId !== push.firebase.project_id) {
-      let app = getApps().find((a) => a.name === NAME);
-      if (!app) {
-        try {
-          app = await initializeApp(
-            {
-              projectId: push.firebase.project_id,
-              apiKey: push.firebase.api_key,
-              appId: push.firebase.app_id,
-              messagingSenderId: push.firebase.sender_id,
-              storageBucket: push.firebase.storage_bucket || undefined,
-            },
-            NAME,
-          );
-        } catch (initError) {
-          // гонка инициализации: если app создал параллельный вызов — переиспользуем
-          try {
-            app = getApp(NAME);
-          } catch {
-            console.warn("[push] runtime firebase init failed, fallback to default", initError);
-            return messaging();
-          }
-        }
-      }
-      return getMessaging(app);
+    if (defaultOpts && defaultOpts.projectId === fb.project_id) {
+      return messaging(); // тот же проект, что зашит — дефолтный app
     }
+    let app = getApps().find((a) => a.name === SECONDARY_APP_NAME);
+    if (!app) {
+      try {
+        app = await initializeApp(
+          {
+            projectId: fb.project_id,
+            apiKey: fb.api_key,
+            appId: fb.app_id,
+            messagingSenderId: fb.sender_id,
+            storageBucket: fb.storage_bucket || undefined,
+          },
+          SECONDARY_APP_NAME,
+        );
+      } catch (initError) {
+        // гонка инициализации: если app создал параллельный вызов — переиспользуем
+        app = getApp(SECONDARY_APP_NAME);
+        void initError;
+      }
+    }
+    return getMessaging(app);
   } catch (e) {
-    // не критично: fallback на дефолт; токен просто не подойдёт чужому проекту
-    console.warn("[push] firebase resolve failed, fallback to default", e);
+    console.warn("[push] конфиг firebase сервера нерабочий — пуши отключены", e);
+    return null;
   }
-  return messaging();
+}
+
+/** Смена сервера: secondary-app предыдущего сервера нужно убить, иначе повторный
+ * initializeApp с тем же именем вернёт app со СТАРЫМИ опциями (§19.3). */
+export async function resetSecondaryFirebaseApp(): Promise<void> {
+  const existing = getApps().find((a) => a.name === SECONDARY_APP_NAME);
+  if (existing) {
+    await deleteApp(existing).catch(() => {});
+  }
 }
 
 /** Текущий открытый чат — его уведомления не показываем и смываем. */
