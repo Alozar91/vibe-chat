@@ -6,8 +6,8 @@
  * обновляет realtime-диспетчер). Background/quit → notifee рисует уведомление.
  * Тап → deep link в чат (холодный старт — сначала restore сессии, потом навигация).
  *
- * Payload пула — только идентификаторы (chat_id, message_id, count, §3.8):
- * текст не светим в FCM-шине; в уведомлении — название чата из кэша + count.
+ * Payload пула содержит контент (решение 2026-11-25, §18): title/body от
+ * бэкенда, lines для InboxStyle; chat_id — для дедупа и deep link.
  */
 
 import { deleteApp, getApps, getApp, initializeApp } from "@react-native-firebase/app";
@@ -295,8 +295,15 @@ export async function showMessageNotification(
 
 // ── Deep link vibechat://chat/{id} (тап по уведомлению) ────────────────────
 
-/** Навигация в чат после restore сессии (холодный старт, §3.6). */
+/** Навигация в чат после restore сессии (холодный старт, §3.6).
+ * Дедуп 3 с: пресс-событие уведомления может прийти и в onBackgroundEvent,
+ * и в onForegroundEvent (resumed activity) — двойной push чата недопустим. */
+let lastDeepLink: { chatId: string; at: number } | null = null;
+
 export async function handlePushDeepLink(chatId: string): Promise<void> {
+  const now = Date.now();
+  if (lastDeepLink && lastDeepLink.chatId === chatId && now - lastDeepLink.at < 3000) return;
+  lastDeepLink = { chatId, at: now };
   console.info("[push] deep link to chat", chatId);
   const { router } = await import("expo-router");
   const deadline = Date.now() + 10_000;
@@ -330,25 +337,42 @@ export async function installPushHandlers(): Promise<void> {
 
   // тап по уведомлению при живом приложении (foreground/background):
   // data-only FCM не имеет notification-части — тап отдаёт notifee.
+  // Диспетчеризация — в call-notifications (сообщения и звонки §17 D);
+  // динамический import — без статического цикла между сервисами.
   void notifee.onForegroundEvent(async ({ type, detail }) => {
-    if (type === EventType.PRESS) {
-      const chatId = detail.notification?.data?.chat_id;
-      if (typeof chatId === "string") await handlePushDeepLink(chatId);
-    }
+    if (type !== EventType.PRESS) return;
+    const { handleNotificationPress } = await import("./call-notifications");
+    const data = (detail.notification?.data ?? {}) as Record<string, unknown>;
+    await handleNotificationPress(detail.pressAction?.id, data);
   });
 
-  // background/quit: Android будит JS — рисуем уведомление.
+  // background/quit: Android будит JS — звонки → карты звонков (§17 D),
+  // остальное — уведомления сообщений.
   m.setBackgroundMessageHandler(async (message) => {
+    const data = (message.data ?? {}) as Record<string, unknown>;
+    const type = typeof data.type === "string" ? data.type : "";
+    if (type.startsWith("call.")) {
+      const { handleCallDataPush } = await import("./call-notifications");
+      await handleCallDataPush(data);
+      return;
+    }
     await showMessageNotification(message);
   });
 
-  // тап при живом (background) приложении: data-only FCM не имеет notification-
-  // части — открытие и тап отдаёт notifee (RN Firebase тут не участвует).
+  // старт приложения по тапу из уведомления (cold start): звонки (§17 D) —
+  // ответ/отклонение/подъём оверлея из снапшота; сообщения — чат.
   void notifee
     .getInitialNotification()
-    .then((initial) => {
-      const chatId = initial?.notification.data?.chat_id;
-      if (typeof chatId === "string") return handlePushDeepLink(chatId);
+    .then(async (initial) => {
+      const data = (initial?.notification.data ?? {}) as Record<string, unknown>;
+      const type = typeof data.type === "string" ? data.type : "";
+      if (!type.startsWith("call.")) {
+        const chatId = initial?.notification.data?.chat_id;
+        if (typeof chatId === "string") return handlePushDeepLink(chatId);
+        return;
+      }
+      const { handleNotificationPress } = await import("./call-notifications");
+      await handleNotificationPress(initial?.pressAction?.id, data);
     })
     .catch(() => {});
 

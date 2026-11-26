@@ -253,9 +253,34 @@ REST API (/api/v1), WebSocket (tickets), presigned Silo, FCM — существ�
 
 **Ограничения MVP**
 
-- Звонок живёт только пока приложение открыто (WS нужен для сигналинга): убили из recents → учасники видят leave; incoming-call при убитом приложении не доставляется (перспектива: FCM data `call.ring` + notifee CallStyle + foreground service — отдельный этап)
+- Звонок живёт только пока приложение открыто (WS нужен для сигналинга): убили из recents → учасники видят leave; входящий при убитом приложении — решён фоновыми звонками (§3.14, этап 11); групповой звонок всё ещё требует оверлея приложения для join (карта уведомления ведёт в чат)
 - Шаринг экрана на мобильном — не в MVP (Android 14 требует mediaProjection foreground-service — отдельно)
 - Без интеграции с системным телефоном (ConnectionService/в стиле CallKit) — всё внутри приложения
+
+### 3.14 Фоновые звонки (этап 11; §17 D концепции) — реализовано 2026-11-26
+
+Входящий звонок при убитом/свёрнутом процессе: сигналинг дублируется FCM data-пушами (бэкенд — `backend/app/services/push.py`, аудитория и правила — §18: только офлайн-участники, без инициатора/актора, ошибки пуша не ломают звонок).
+
+**Бэкенд** (коммит `697d277`): `push_call_ring` (direct ringing → `call.ring`), `push_call_started` (group active → `call.started`), `push_call_cancelled` (cancel/reject/TTL-cleanup → `call.cancelled`, только тем, кому шёл ринг); payload — `type`, `call_id`, `chat_id`, `caller_id`, `caller_name`, `kind`, `chat_type`. WS-события не дублируются пушем онлайн-получателям (presence-фильтр).
+
+**Клиент** — `src/services/call-notifications.ts`:
+
+- Канал «Звонки» (HIGH, звук `res/raw/ring.wav` — мгновенный алерт; дальше ринг ведёт JS-луп `ringPlayer`), карта: `AndroidCategory.CALL` + `fullScreenAction` (полноэкранный intent на lock screen) + действия «Ответить»/«Отклонить» + `asForegroundService`. CallStyle в notifee 9.x отсутствует — карта собирается из перечисленного
+- **Foreground service**: `registerCallForegroundService()` в `index.js` top-level (до первого показа); runner держит ринг-луп + TTL-страховку 45 с (равна `CALL_TIMEOUT_SECONDS` бэкенда) → `cancelCallNotification`. Тип `phoneCall` на `app.notifee.core.ForegroundService` (`tools:replace`, API 34 требует объявленный тип)
+- Разрешения: `USE_FULL_SCREEN_INTENT` (Android 14+ — ещё и разрешение в системных настройках), `FOREGROUND_SERVICE_PHONE_CALL`, `MANAGE_OWN_CALLS`
+- **Два JS-контекста (§3.5)**: headless-VM (FCM background) и VM приложения — разные сторы. Диспетчеризация пресс-событий (`handleNotificationPress`): REST-мутации напрямую через `callsApi` (409 = уже принял другой контекст — не ошибка); стор/оверлей/медиа — только в VM приложения (`AppState !== "unknown"`). В headless после REST карта снимается принудительно (иначе висит до TTL)
+- Идемпотентность: один id уведомления `call-{call_id}` на звонок — повторный ринг перезаписывает карту, `cancelCallNotification` снимает по id (нужен и WS-путям: `call.cancelled`/ended/accepted-эхо)
+
+**Кейсы доставки**:
+
+- **Процесс убит** → FCM `call.ring` → headless рисует карту + FGS (ринг). «Ответить» → REST accept → cold start: `getInitialNotification` (push-service) → `acceptFromNotification` — стор берёт синтетический `Call` из снапшота (409-ветка: REST уже прошёл в headless), WS-эхо `call.accepted` уточняет объект; «Отклонить» → REST reject; тап по телу → adopt оверлея из снапшота (решение за пользователем)
+- **Процесс жив, но свёрнут** (MIUI-свайп из recents не убивает — presence > 0, пуша нет) → WS доставляет ринг в свёрнутый UI → `realtime-sync.ts` (`syncCalls`): `AppState !== "active"` и чужой звонок → та же карта уведомления, что рисует headless (логика в одном месте — стор звонков, который слушает все `call.*`)
+- `call.cancelled` (initiator отменил/другой отклонил/TTL) → карта снимается (FCM-пуш или WS)
+- Групповой: FCM `call.started` (первый join) → обычная карта (канал «Сообщения», тап → чат); WS `call.joined` при свёрнутом приложении → та же карта локально
+
+**Дедуп FCM и WS**: в фоне приходят либо пуш (убит), либо WS (жив но свёрнут) — одновременно не бывает; `handleCallDataPush` и `syncCalls` рисуют одну карту с одним id. Foreground-приложение пушей звонков не получает (presence-фильтр бэкенда), WS-путь обязателен для ринг-эха инициатора.
+
+**Грабли**: пуш `call.cancelled` содержит `chat_id` — без диспетчеризации по `data.type` в `setBackgroundMessageHandler` рисовался бы как «новое сообщение» (исправлено и в `index.js`, и в `push-service.ts`); `index.js` — plain JS (Flow-парсер, TS-аннотации нельзя); тап по карте при живом процессе шлёт пресс-событие и в `onBackgroundEvent`, и в `onForegroundEvent` — deep link чата дедупицируется (3 с, `lastDeepLink` в push-service).
 
 ## 4. Идентификация приложения
 
@@ -357,6 +382,7 @@ android/                # генерируется expo prebuild (в git не х
 8. **Звонки, аудио (этап 9, §3.12)** — **реализовано и проверено e2e (2026-11-25)**: SDK LiveKit RN (`@livekit/react-native` + webrtc, `registerGlobals`, `setup(CommunicationAudioType)`, dexing-фикс), ринг — `expo-audio` луп + вибрация (`src/services/ring.ts`); стор `src/stores/calls.ts` (порт вебового `calls.ts`: current/media/muted/speaker, WS-диспатч в `realtime-sync.ts`); оверлей `src/components/call-overlay.tsx` в `<Modal>`. Проверено e2e против dev-бэкенда (вторая сторона — Python-скрипт-пир с REST+WS): исходящий 1:1 ring → accept → LiveKit connect → publish → завершение; входящий (карточка → accept → панель → сброс), отклонение, отмена исходящего, тайм-аут ринга на бэкенде (45 с: ended + `call.cancelled` в WS + системное «пропущенный звонок»), group-звонок (баннер «идёт звонок · N уч.» → «Присоединиться» → панель с составом → leave). Бэкенд-фикс (2026-11-25): `cleanup_stale_calls` публиковал закрытия в WS — добавлен `call.cancelled` в оба цикла (иначе клиент висел в зомби-ринге до своего тайм-аута на 409). Двустороннее аудио подтверждено пользователем (эмулятор ↔ веб-пир, LiveKit; микрофон эмулятора — см. §9)
 9. **Звонки, видео (этап 10, §3.12)** — **реализовано и проверено e2e (2026-11-25)**: стор — `remoteCams`/`localCam` + `syncCams`/`syncLocalCam` (живость = подписан и не muted); оверлей — `VideoTile`/`ActiveVideo` (direct: полноэкранный пир + своя PiP; группа: сетка ≤ 8, 2 колонки), `VideoHeader` (статус-точка + таймер), `VideoControls` (🎙/🎥/🔇/hang-up); `VideoView` из `@livekit/react-native` (`videoTrack`-проп, работает несмотря на deprecation-заметку). Проверено e2e против dev-бэкенда: входящий видео-ринг («Входящий видеозвонок») → accept → полноэкранный оверлей с PiP и контролами; вкл/выкл камеры (PiP яркость 131↔16, сервер muted False/True — вкл через unpublish+republish, см. §9); групповой: баннер «идёт видеозвонок · N уч.» → «Присоединиться» → сетка (живая плитка своей камеры + тёмная половина) → leave; исходящий «Видеовызов…» → отмена; системные «звонок»/«пропущенный звонок»; отказ в камере → тост «Камера недоступна — только звук» + звонок продолжается (ринг-карточка на месте). Keep-awake включён на звонок. Двустороннее видео между двумя устройствами проверено (эмулятор ↔ телефон, e2e 2026-11-25: оба участника ACTIVE с аудио+видео треками 45+ с, пиксельная проверка обеих плиток; media эмулятора — через dev-coturn, телефона — напрямую, см. §9)
 10. **Релизная сборка** — **реализовано и проверено (2026-11-26)**: release-keystore вне git + бэкап вне репо (§4.1), `assembleRelease` подписан (apksigner: CN=Vibe Chat Release), NSC — https обязателен, cleartext только dev-хосты, гейт `min_version` (§3.8) — блокирующий экран + «Проверить снова», версии 1.0.0(code 1) → 1.0.1(code 2) с проверкой обновления поверх; смоук на обеих сторонах: эмулятор (admin) и телефон (pushtest1, MIUI USB-install подтверждение на экране). Грабли этапа — §4.1 и §9: инлайн env только для статических `process.env.EXPO_PUBLIC_*`
+11. **Фоновые звонки (§3.14, §17 D)** — **реализовано (2026-11-26)**: бэкенд — FCM data-пуши `call.ring`/`call.started`/`call.cancelled` офлайн-участникам (коммит `697d277`, 9 тестов); клиент — `call-notifications.ts` (карта звонка + foreground service + TTL-страховка), диспетчеризация пресс-событий и начального уведомления, `acceptFromNotification`/`adoptIncomingCall` в сторе, WS-карта при свёрнутом приложении (`syncCalls`), манифест (USE_FULL_SCREEN_INTENT, phoneCall FGS), канал «Звонки» со звуком `res/raw/ring.wav`
 
 Критерии готовности этапов (минимальная приёмка, проверяется вручную на эмуляторе против стенда):
 

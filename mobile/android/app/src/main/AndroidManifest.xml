@@ -10,6 +10,14 @@
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+  <!-- Фоновые звонки (§17 D): карта входящего звонка. USE_FULL_SCREEN_INTENT —
+       full-screen intent на экране блокировки (Android 14+ — ещё и разрешение
+       в настройках); FOREGROUND_SERVICE_PHONE_CALL/MANAGE_OWN_CALLS — тип
+       phoneCall у notifee-сервиса (требование API 34) -->
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
+  <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -33,5 +41,12 @@
         <data android:scheme="vibechat"/>
       </intent-filter>
     </activity>
+    <!-- notifee foreground service (§17 D): тип phoneCall — на Android 14+
+         startForeground без declared type падает; tools:replace перекрывает
+         декларацию из AAR notifee-core -->
+    <service
+      android:name="app.notifee.core.ForegroundService"
+      android:foregroundServiceType="phoneCall"
+      tools:replace="android:foregroundServiceType"/>
   </application>
 </manifest>

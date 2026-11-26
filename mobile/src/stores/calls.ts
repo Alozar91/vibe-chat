@@ -10,9 +10,15 @@ import { create } from "zustand";
 import { Room, RoomEvent, Track, type VideoTrack } from "livekit-client";
 import { PermissionsAndroid, Platform, Vibration, type Permission } from "react-native";
 import { callsApi } from "../api/endpoints";
+import { ApiError } from "../services/api-client";
 import type { Call } from "../api/types";
+import { cancelCallNotification } from "../services/call-notifications";
 import { config } from "../services/config";
 import { ringPlayer } from "../services/ring";
+
+/** Данные входящего звонка из уведомления (§17 D): достаточно для синтетического
+ * Call до прихода WS-эха (call.accepted/call.cancelled уточняют объект). */
+export type IncomingCallSnapshot = import("../services/call-notifications").CallNotificationPayload;
 
 export type MediaStatus = "idle" | "connecting" | "connected";
 
@@ -40,6 +46,14 @@ interface CallsState {
   start: (chatId: string, kind?: "audio" | "video") => Promise<void>;
   join: (callId: string) => Promise<void>;
   accept: (withVideo?: boolean) => Promise<void>;
+  /** Принять из уведомления (§17 D): контекст приложения после тапа «Ответить»
+   * (cold start через getInitialNotification / живой — after пресс-события).
+   * REST идемпотентен: 409 = уже приняли в headless/на другом устройстве —
+   * восстанавливаемся из синтетического Call, реальный догонит WS. */
+  acceptFromNotification: (callId: string, snapshot: IncomingCallSnapshot) => Promise<void>;
+  /** Открыть звонок из уведомления без принятия (тап по карте в cold start):
+   * поднять оверлей ринга из снапшота, решение — обычными accept/reject. */
+  adoptIncomingCall: (callId: string, snapshot: IncomingCallSnapshot) => void;
   reject: () => Promise<void>;
   cancel: () => Promise<void>;
   leave: () => Promise<void>;
@@ -172,10 +186,45 @@ export const useCalls = create<CallsState>((set, get) => ({
       const updated = await callsApi.accept(call.id);
       set({ current: updated });
       syncRing();
+      // карта входящего звонка больше не нужна (§17 D); no-op, если её не было
+      void cancelCallNotification(call.id);
       await connectMedia(withVideo);
     } catch (err) {
       setErrorState(errMessage(err));
     }
+  },
+
+  acceptFromNotification: async (callId, snapshot) => {
+    const cur = get().current;
+    if (cur && cur.id !== callId) return; // активен другой звонок
+    if (cur?.id === callId && cur.status === "active") return; // уже принят
+    setErrorState(null);
+    try {
+      await ensureMicPermission();
+      try {
+        const updated = await callsApi.accept(callId);
+        set({ current: updated });
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 409)) throw err;
+        // 409: headless-контекст успел раньше — синтетический Call (уже активен:
+        // сам accept прошёл); реальный догонит WS-эхо call.accepted
+        const synthetic = syntheticCall(callId, snapshot);
+        synthetic.status = "active";
+        set({ current: synthetic });
+      }
+      syncRing();
+      void cancelCallNotification(callId);
+      await connectMedia(true);
+    } catch (err) {
+      setErrorState(errMessage(err));
+    }
+  },
+
+  adoptIncomingCall: (callId, snapshot) => {
+    const cur = get().current;
+    if (cur) return; // уже есть звонок (этот или другой) — ничего не трогаем
+    set({ current: syntheticCall(callId, snapshot) });
+    syncRing();
   },
 
   reject: async () => {
@@ -199,7 +248,6 @@ export const useCalls = create<CallsState>((set, get) => ({
       setErrorState(errMessage(err));
     }
   },
-
   leave: async () => {
     const call = get().current;
     if (!call) return;
@@ -299,6 +347,10 @@ export const useCalls = create<CallsState>((set, get) => ({
     const room = get().room;
     if (room) room.disconnect().catch(() => {});
     void AudioSession.stopAudioSession();
+    // карта входящего звонка (если была) тоже снимается — все терминальные
+    // пути звонка идут через clear (reject/cancel/leave/WS ended, §17 D)
+    const callId = get().current?.id;
+    if (callId) void cancelCallNotification(callId);
     set({
       current: null,
       room: null,
@@ -323,6 +375,21 @@ function errMessage(err: unknown): string {
   if (msg.includes("403")) return "err_no_access";
   if (msg.includes("permission")) return "err_mic_denied";
   return "err_generic";
+}
+
+/** Синтетический Call из данных уведомления (§17 D) — до прихода WS-эха. */
+function syntheticCall(callId: string, snapshot: IncomingCallSnapshot): Call {
+  return {
+    id: callId,
+    chat_id: snapshot.chat_id,
+    initiator_id: snapshot.caller_id,
+    kind: snapshot.kind,
+    status: "ringing",
+    created_at: new Date().toISOString(),
+    started_at: null,
+    ended_at: null,
+    participant_ids: [],
+  };
 }
 
 /** Ринг: гудок лупом, пока звонок в ringing (и входящий, и мой исходящий). */

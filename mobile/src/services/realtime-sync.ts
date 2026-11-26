@@ -5,13 +5,20 @@
  */
 
 import type { QueryClient } from "@tanstack/react-query";
+import { AppState } from "react-native";
 import { messagesApi } from "../api/endpoints";
 import { queryKeys } from "../api/query-keys";
-import type { Chat, LocalMessage, Message, WsEnvelope } from "../api/types";
+import type { Call, Chat, ChatDetail, LocalMessage, Message, WsEnvelope } from "../api/types";
 import { upsertMessageInCache } from "../hooks/use-send-message";
 import { useCalls } from "../stores/calls";
 import { useRealtime } from "../stores/realtime";
+import { useSession } from "../stores/session";
 import { wsClient } from "./ws-client";
+import {
+  cancelCallNotification,
+  showGroupCallNotification,
+  showIncomingCallNotification,
+} from "./call-notifications";
 
 /** Сообщение из WS message.* — сервер оборачивает payload: {message: <MessageOut>} (§9). */
 function asMessage(data: unknown): Message | null {
@@ -146,7 +153,7 @@ export function installRealtimeSync(queryClient: QueryClient): () => void {
         // звонки (§3.12): call.* → стор звонков (нужны и для моего эха ринга,
         // и для чужих) — события касаются статуса звонка (§17)
         if (envelope.type.startsWith("call.")) {
-          useCalls.getState().handleWsEvent(envelope.type, data);
+          syncCalls(envelope, data, queryClient);
         }
         return;
       }
@@ -155,4 +162,63 @@ export function installRealtimeSync(queryClient: QueryClient): () => void {
 
   wsClient.onDispatch(dispatch);
   return () => wsClient.onDispatch(null);
+}
+
+/** Звонки: стор + локальная карта уведомления при свёрнутом приложении (§17 D).
+ * Процесс жив (MIUI-свайп не убивает): WS доставил ринг, но UI свёрнут —
+ * показываем ту же карту, что рисует headless из FCM-пуша (его тут нет:
+ * presence > 0 → бэкенд пуш не отправляет). */
+function syncCalls(envelope: WsEnvelope, data: unknown, queryClient: QueryClient): void {
+  const call = (data as { call?: Call }).call;
+  if (!call?.id) {
+    useCalls.getState().handleWsEvent(envelope.type, data);
+    return;
+  }
+  const meId = useSession.getState().user?.id;
+  const hadCurrent = useCalls.getState().current?.id === call.id;
+  useCalls.getState().handleWsEvent(envelope.type, data);
+  const cur = useCalls.getState().current;
+
+  // звонок «ушёл» из моего current (завершён/отклонён/принят на другом
+  // устройстве) → снять карту, если была показана (идемпотентно)
+  const acceptedElsewhere =
+    cur &&
+    cur.id === call.id &&
+    cur.status === "active" &&
+    meId &&
+    cur.initiator_id !== meId &&
+    !cur.participant_ids.includes(meId);
+  if ((hadCurrent && (!cur || cur.id !== call.id)) || acceptedElsewhere) {
+    void cancelCallNotification(call.id);
+  }
+
+  // свёрнутое приложение + чужой звонок → карта уведомления (о звонке ИЗ события,
+  // не о store.current — стор мог проигнорировать чужой звонок при занятости)
+  if (AppState.currentState === "active") return;
+  const isMine = meId !== undefined && (call.initiator_id === meId || call.participant_ids.includes(meId));
+  if (isMine) return;
+  const payload = {
+    call_id: call.id,
+    chat_id: call.chat_id,
+    caller_id: call.initiator_id,
+    caller_name: callerNameFromCache(call.chat_id, call.initiator_id, queryClient),
+    kind: call.kind,
+  };
+  // мой входящий ринг direct — стор его взял в current (иначе занят)
+  if (envelope.type === "call.ring" && call.status === "ringing" && cur?.id === call.id) {
+    void showIncomingCallNotification(payload);
+    return;
+  }
+  // групповой звонок (call.joined — первый join или последующие участники):
+  // тап → чат; если я не участник — стор мог не взять чужой звонок (занят другим)
+  if (envelope.type === "call.joined" && call.status === "active") {
+    void showGroupCallNotification(payload);
+  }
+}
+
+/** Имя участника из кэша (Call не содержит имён); fallback — «Пользователь». */
+function callerNameFromCache(chatId: string, userId: string, queryClient: QueryClient): string {
+  const detail = queryClient.getQueryData<ChatDetail>(queryKeys.chats.detail(chatId));
+  const member = detail?.members?.find((m) => m.user.id === userId);
+  return member?.user.display_name ?? "Пользователь";
 }

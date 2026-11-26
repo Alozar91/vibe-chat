@@ -17,7 +17,12 @@ import notifee, { EventType } from "@notifee/react-native";
 // обязателен до загрузки любого кода, использующего livekit-client
 import { registerGlobals } from "@livekit/react-native";
 
-import { handlePushDeepLink, showMessageNotification } from "./src/services/push-service";
+import { showMessageNotification } from "./src/services/push-service";
+import {
+  handleCallDataPush,
+  handleNotificationPress,
+  registerCallForegroundService,
+} from "./src/services/call-notifications";
 import { initTheme } from "./src/theme";
 
 registerGlobals();
@@ -25,12 +30,24 @@ registerGlobals();
 // Тема до первого рендера (§3.10): MMKV-настройка + listener system-режима
 initTheme();
 
+// Фоновые звонки (§17 D): runner foreground service — ДО первого показа
+// asForegroundService-уведомления (карта входящего звонка держит процесс
+// и ринг-луп; в каждом JS-контексте — своя регистрация, это норма)
+registerCallForegroundService();
+
 // GMS-less устройства (без Google Play Services): FirebaseApp инициализируется,
 // но FCM-операции недоступны — получить токен нельзя, пуши не приходят (§19.6).
 // Ошибка здесь недопустима: это top-level до AppRegistry — уронит холодный старт
 // всего приложения. Ловим и живём без пушей (проверка: AVD без Google APIs).
 try {
   messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    // звонки (§17 D): call.* → карты звонков/снятие; остальное — сообщения
+    const data = (remoteMessage.data ?? {});
+    const type = typeof data.type === "string" ? data.type : "";
+    if (type.startsWith("call.")) {
+      await handleCallDataPush(data);
+      return;
+    }
     await showMessageNotification(remoteMessage);
   });
 } catch (e) {
@@ -38,8 +55,10 @@ try {
 }
 
 void notifee.onBackgroundEvent(async ({ type, detail }) => {
-  if (type === EventType.PRESS) {
-    const chatId = detail.notification?.data?.chat_id;
-    if (typeof chatId === "string") await handlePushDeepLink(chatId);
-  }
+  if (type !== EventType.PRESS) return;
+  // Диспетчеризация: сообщения → чат, звонки (§17 D) → answer/decline/оверлей.
+  // В headless VM dispatch ограничен REST (AppState 'unknown'); UI-путь поднимает
+  // контекст приложения (getInitialNotification в push-service)
+  const data = (detail.notification?.data ?? {});
+  await handleNotificationPress(detail.pressAction?.id, data);
 });
