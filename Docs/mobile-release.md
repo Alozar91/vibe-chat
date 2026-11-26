@@ -18,7 +18,7 @@
 - `versionName` — семантическая, `versionCode` — монотонный счётчик, **бамп на каждой release-сборке**, в **двух местах синхронно**:
   - `mobile/app.json` → `expo.version` и `expo.android.versionCode`
   - `mobile/android/app/build.gradle` → `versionCode` / `versionName` (~строки 95–96)
-- Текущее состояние: **`1.0.3` / code `4`** (`1.0.0`/1 → `1.0.1`/2 → `1.0.2`/3 → `1.0.3`/4; 1.0.3 — self-host: экран подключения, динамический конфиг, per-app FCM).
+- Текущее состояние: **`1.0.4` / code `5`** (`1.0.0`/1 → `1.0.1`/2 → `1.0.2`/3 → `1.0.3`/4 → `1.0.4`/5; 1.0.4 — NSC trust-anchors: зашитый GlobalSign Root R46 — без него Android-хранилище не доверяло TLS стенда merch-vibe.ru, инцидент 2026-11-26).
 - Клиент сравнивает с сервером `versionName` (семантика X.Y.Z, `src/services/app-version.ts`); `versionCode` в гейте не участвует.
 
 ```bash
@@ -120,6 +120,7 @@ MIUI (Xiaomi): при первой `adb install` на экране телефо�
 
 - **env не запёкся** → «EXPO_PUBLIC_… не задан» при старте release-сборки. Причина: доступ к env в коде — **только статический** (`process.env.EXPO_PUBLIC_X`); babel-инлайнер Expo не разворачивает динамические `process.env['EXPO_PUBLIC_' + name]` (в debug его выручает рантайм-гидратация от dev-сервера, в release её нет). Лечение: статические обращения в `config.ts`; проверка — §5 п.3. Если Gradle не пересобрал бандл после правки только конфига/env — дёрнуть содержимое JS-файла (Gradle хеширует контент, `touch` не помогает) или `./gradlew createBundleReleaseJsAndAssets --rerun-tasks`.
 - **Cleartext в release** — сеть режется NSC (`app/src/main/res/xml/network_security_config.xml`): https обязателен по умолчанию, cleartext разрешён только `localhost` (adb reverse), `10.0.2.2` (эмулятор), `192.168.1.64` (dev-LiveKit, машинно-специфичен — при смене машины править XML). Симптом: fetch/WS молча падают в release при рабочем debug. Новый dev-хост — добавить в XML.
+- **Корни CA (с 1.0.4)** — NSC base-config содержит `<trust-anchors>`: `system` + зашитые корни `res/raw/*.pem` (первый — GlobalSign Root R46: цепочка merch-vibe.ru замыкается только на него, в Android-хранилище MIUI/125 корней его нет — RN/OkHttp не доверяли TLS стенда при рабочем Chrome; диагностика — `openssl s_client -showcerts` до корня + `subject_hash_old` grep по `/system/etc/security/cacerts/` на телефоне). Хостеру с чужим экзотичным сертификатом на старом Android — либо Let's Encrypt (ISRG Root X1 есть везде с 7.1), либо прислать корень — добавить PEM + `<certificates src="@raw/..."/>` + пересборка. Ошибка в PEM/синтаксисе NSC = падение ВСЕХ https-запросов в релизе — после правки обязательно смоук-подключение.
 - **debug-версия поверх release** (и наоборот) — не ставится: сначала `uninstall` (потеря локального состояния ожидаема).
 - **Prebuild затирает ручные правки** `android/app/build.gradle` (signing) и манифеста (NSC) — `android/` в git; после `expo prebuild` сверить §3 и NSC заново.
 - Пуши: push-токены переживают обновление (Keystore/MMKV сохраняются), но не uninstall.

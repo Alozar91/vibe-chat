@@ -4,9 +4,21 @@
   Cleartext разрешён ТОЛЬКО dev-адресам: localhost (adb reverse), 10.0.2.2
   (эмулятор -> хост), 192.168.1.64 (LAN-IP хоста с dev-LiveKit, машинно-специфичен).
   debug-оверлей (usesCleartextTraffic=true) перекрывается NSC — правила те же.
+
+  trust-anchors: system + зашитые корни свежих CA (self-host: хостер может
+  поставить сертификат, чей корень ещё не в снапшоте хранилища Android;
+  Chrome прощает — свой стор, RN/OkHttp — нет). Глобаль на ВСЕ домены.
+  GlobalSign Root R46 — sha256 4FA3…3C40C9, источник — официальный
+  secure.globalsign.com/cacert/rootr46.crt (сверено с цепочкой стенда,
+  инцидент 2026-11-26: merch-vibe.ru AlphaSSL 2025 не trusted на Android 13/MIUI).
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="@raw/globalsign_root_r46"/>
+        </trust-anchors>
+    </base-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">localhost</domain>
         <domain includeSubdomains="false">10.0.2.2</domain>
