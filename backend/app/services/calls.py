@@ -119,6 +119,16 @@ async def start_call(
         call.started_at = _now()
     await db.commit()
     await _publish_call(db, call, "call.joined" if initial_status == "active" else "call.ring")
+    # Фоновые звонки (§17 D): ринг direct / «звонок начался» group — офлайн-участникам
+    from app.services import push as push_service
+
+    if initial_status == "active":
+        chat_type = chat.type if chat is not None else "group"
+        await push_service.push_call_started(
+            db, chat_id=chat_id, call=call, caller=actor, chat_type=chat_type
+        )
+    else:
+        await push_service.push_call_ring(db, chat_id=chat_id, call=call, caller=actor)
     return call, True
 
 
@@ -158,6 +168,9 @@ async def reject_call(db: AsyncSession, *, actor: User, call_id: str) -> Call:
     await db.commit()
     await _publish_call(db, call, "call.rejected")
     await _write_call_system(db, call)
+    from app.services import push as push_service
+
+    await push_service.push_call_cancelled(db, chat_id=call.chat_id, call=call, exclude_user_id=actor.id)
     return call
 
 
@@ -173,6 +186,9 @@ async def cancel_call(db: AsyncSession, *, actor: User, call_id: str) -> Call:
     await db.commit()
     await _publish_call(db, call, "call.cancelled")
     await _write_call_system(db, call)
+    from app.services import push as push_service
+
+    await push_service.push_call_cancelled(db, chat_id=call.chat_id, call=call, exclude_user_id=actor.id)
     return call
 
 
@@ -271,6 +287,11 @@ async def cleanup_stale_calls(db: AsyncSession, *, now: datetime | None = None) 
     for call in stale_rings:
         await _publish_call(db, call, "call.cancelled")
         await _write_call_system(db, call)
+        from app.services import push as push_service
+
+        await push_service.push_call_cancelled(
+            db, chat_id=call.chat_id, call=call, exclude_user_id=call.initiator_id
+        )
 
     actives = (await db.scalars(select(Call).where(Call.status == "active"))).all()
     for call in actives:

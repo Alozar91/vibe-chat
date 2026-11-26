@@ -15,6 +15,7 @@ title чата, готовый body («от кого и что» либо «N н
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from app.core import valkey
 from app.models.chat import Chat
@@ -238,6 +239,105 @@ async def _build_payload(
 def _clip(s: str | None, limit: int = _TEXT_LIMIT) -> str:
     s = (s or "").strip()
     return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+# --- Фоновые звонки (§17 D) ---------------------------------------------
+
+
+async def _push_call_data(db: AsyncSession, *, user_ids: list[str], data: dict[str, str]) -> None:
+    """Data-пуш всем устройствам перечисленных пользователей (без курсора/агрегации:
+    звонок — живое состояние, идемпотентность на клиенте — один id уведомления).
+    Ошибки не ломают основной путь звонка (§18)."""
+    try:
+        tokens = (
+            (await db.execute(select(DeviceToken).where(DeviceToken.user_id.in_(user_ids))))
+            .scalars()
+            .all()
+        )
+        if not tokens:
+            return
+        dead = await push_gateway.send([t.token for t in tokens], data=data)
+        if dead:
+            await cleanup_dead_tokens(dead)
+    except Exception:
+        logger.exception("call push fanout failed (%s)", data.get("type"))
+
+
+async def _offline_members(db: AsyncSession, *, chat_id: str, exclude_user_id: str) -> list[str]:
+    """Члены чата, кроме исключённого и кроме онлайн (presence-счётчик > 0)."""
+    from app.services.realtime import chat_member_ids
+
+    member_ids = await chat_member_ids(db, chat_id)
+    return [uid for uid in member_ids if uid != exclude_user_id and not await _is_online(uid)]
+
+
+async def push_call_ring(db: AsyncSession, *, chat_id: str, call: Any, caller: User) -> None:
+    """Direct: ринг офлайн-участникам (§17 D) — карта входящего звонка с действиями."""
+    if not push_gateway.push_enabled():
+        return
+    try:
+        targets = await _offline_members(db, chat_id=chat_id, exclude_user_id=caller.id)
+        if not targets:
+            return
+        await _push_call_data(
+            db,
+            user_ids=targets,
+            data={
+                "type": "call.ring",
+                "call_id": call.id,
+                "chat_id": chat_id,
+                "caller_id": caller.id,
+                "caller_name": caller.display_name or caller.username or "",
+                "kind": call.kind,
+                "chat_type": "direct",
+            },
+        )
+    except Exception:
+        logger.exception("push_call_ring failed (chat %s)", chat_id)
+
+
+async def push_call_started(
+    db: AsyncSession, *, chat_id: str, call: Any, caller: User, chat_type: str
+) -> None:
+    """Group: «звонок начался» офлайн-участникам — тап ведёт в чат (баннер join)."""
+    if not push_gateway.push_enabled():
+        return
+    try:
+        targets = await _offline_members(db, chat_id=chat_id, exclude_user_id=caller.id)
+        if not targets:
+            return
+        await _push_call_data(
+            db,
+            user_ids=targets,
+            data={
+                "type": "call.started",
+                "call_id": call.id,
+                "chat_id": chat_id,
+                "caller_id": caller.id,
+                "caller_name": caller.display_name or caller.username or "",
+                "kind": call.kind,
+                "chat_type": chat_type,
+            },
+        )
+    except Exception:
+        logger.exception("push_call_started failed (chat %s)", chat_id)
+
+
+async def push_call_cancelled(db: AsyncSession, *, chat_id: str, call: Any, exclude_user_id: str) -> None:
+    """Отмена/отказ/TTL — снять карту звонка у офлайн-получателей ринга (§17 D)."""
+    if not push_gateway.push_enabled():
+        return
+    try:
+        targets = await _offline_members(db, chat_id=chat_id, exclude_user_id=exclude_user_id)
+        if not targets:
+            return
+        await _push_call_data(
+            db,
+            user_ids=targets,
+            data={"type": "call.cancelled", "call_id": call.id, "chat_id": chat_id},
+        )
+    except Exception:
+        logger.exception("push_call_cancelled failed (chat %s)", chat_id)
 
 
 def _unread_word(n: int) -> str:
