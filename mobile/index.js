@@ -25,9 +25,17 @@ registerGlobals();
 // Тема до первого рендера (§3.10): MMKV-настройка + listener system-режима
 initTheme();
 
-messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-  await showMessageNotification(remoteMessage);
-});
+// GMS-less устройства (без Google Play Services): FirebaseApp инициализируется,
+// но FCM-операции недоступны — получить токен нельзя, пуши не приходят (§19.6).
+// Ошибка здесь недопустима: это top-level до AppRegistry — уронит холодный старт
+// всего приложения. Ловим и живём без пушей (проверка: AVD без Google APIs).
+try {
+  messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    await showMessageNotification(remoteMessage);
+  });
+} catch (e) {
+  console.warn("[push] headless FCM недоступен (нет Google Play Services?)", e);
+}
 
 void notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type === EventType.PRESS) {
