@@ -4,6 +4,8 @@ dist/
 *.log
 .env
 google-services.json
+# spike/локальные конфиги чужих Firebase-проектов (self-host тесты, §19.6)
+android/google-service.*.json
 
 # Нативные проекты коммитятся (bare workflow): android/ и ios/ в git,
 # игнорируется только генерируемое — см. android/.gitignore

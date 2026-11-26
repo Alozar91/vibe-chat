@@ -2,7 +2,7 @@
   "expo": {
     "name": "Vibe Chat",
     "slug": "vibe-chat",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "scheme": "vibechat",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "android": {
       "package": "ru.vibe.chat.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

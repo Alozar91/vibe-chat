@@ -10,9 +10,8 @@
  * текст не светим в FCM-шине; в уведомлении — название чата из кэша + count.
  */
 
-import messaging, {
-  type FirebaseMessagingTypes,
-} from "@react-native-firebase/messaging";
+import { deleteApp, getApps, getApp, initializeApp } from "@react-native-firebase/app";
+import messaging, { type FirebaseMessagingTypes } from "@react-native-firebase/messaging";
 import { Platform } from "react-native";
 import notifee, {
   AndroidImportance,
@@ -21,12 +20,137 @@ import notifee, {
   EventType,
 } from "@notifee/react-native";
 import { api } from "./api-client";
+import { config } from "./config";
 import { useSession } from "../stores/session";
 import { queryClient } from "./query-client";
 import { queryKeys } from "../api/query-keys";
 import type { Chat, ChatDetail } from "../api/types";
 
 const CHANNEL_ID = "messages";
+const SECONDARY_APP_NAME = "vibe-server";
+
+/** Мессенджер активного Firebase-проекта (§19.6): наличие пушей определяет сервер,
+ * а не сборка. FCM-токен — АДРЕС устройства, не учётка: отправить пуш по нему может
+ * только держатель серверных кредов (SA-ключ) владеющего проекта; клиент креды
+ * никогда не передаёт. Поэтому клиент консервативен:
+ *  - driver != fcm → null (пуши выключены сервером);
+ *  - сервер не назвал свой project_id (firebase=null) → null — токен официального
+ *    проекта чужому серверу не выдаётся;
+ *  - project_id совпал с зашитым (официальный проект) → дефолтный app;
+ *  - другой project_id → secondary-app с конфигом СЕРВЕРА (initializeApp — промис
+ *    в RN Firebase); токен принадлежит проекту сервера, слать может только он
+ *    (его SA-ключ);
+ *  - конфиг сервера битый/не инициализируется → null, НИКОГДА fallback на дефолт
+ *    (иначе чужой сервер получил бы токен официального проекта).
+ * Остаточный риск (осознанно принят, §19.6): сервер, скопировавший ПУБЛИЧНЫЙ
+ * google-services.json официального проекта, может получить инертный токен
+ * (отправить по нему нельзя без SA-ключа) — только кросс-серверная корреляция
+ * устройства. */
+/** Минимальная поверхность messaging, используемая push-сервисом. */
+interface PushMessaging {
+  getToken(): Promise<string>;
+  deleteToken(): Promise<void>;
+  onMessage(listener: (m: FirebaseMessagingTypes.RemoteMessage) => void): () => void;
+  onTokenRefresh(listener: (token: string) => void): () => void;
+  setBackgroundMessageHandler(
+    handler: (m: FirebaseMessagingTypes.RemoteMessage) => Promise<void>,
+  ): void;
+}
+
+/** Адаптер secondary-app (сервер со СВОИМ Firebase-проектом, §19.6).
+ *
+ * RNFB блокирует getMessaging(не-[DEFAULT]) на JS-уровне (hasMultiAppSupport:
+ * false в реестре namespace — пропатчить нельзя, реестр не экспортируется),
+ * но нативный слой per-app поддерживает: getToken/deleteToken принимают
+ * override {appName, senderId} (namespaced.js → FirebaseApp.getInstance(appName)
+ * .get(FirebaseMessaging.class)); события (onMessage/tokenRefresh/headless)
+ * app-агностичны — сериализатор не кладёт appName в событие, подписка без
+ * фильтра, поэтому слушатели дефолтного инстанса получают и чужие сообщения.
+ * Токен-ротация вторичного app в onNewToken не различима (событие без appName)
+ * — приемлемо: перерегистрация происходит при каждом логине/переподключении. */
+class SecondaryMessaging implements PushMessaging {
+  constructor(
+    private base: FirebaseMessagingTypes.Module,
+    private senderId: string,
+  ) {}
+
+  /** Токен ПРОЕКТА СЕРВЕРА (override appName), не дефолтного. */
+  getToken(): Promise<string> {
+    return this.base.getToken({ appName: SECONDARY_APP_NAME, senderId: this.senderId });
+  }
+
+  deleteToken(): Promise<void> {
+    return this.base.deleteToken({ appName: SECONDARY_APP_NAME, senderId: this.senderId });
+  }
+
+  onMessage(listener: (m: FirebaseMessagingTypes.RemoteMessage) => void): () => void {
+    return this.base.onMessage(listener);
+  }
+
+  onTokenRefresh(listener: (token: string) => void): () => void {
+    return this.base.onTokenRefresh(listener);
+  }
+
+  setBackgroundMessageHandler(
+    handler: (m: FirebaseMessagingTypes.RemoteMessage) => Promise<void>,
+  ): void {
+    this.base.setBackgroundMessageHandler(handler);
+  }
+}
+
+async function activeMessaging(): Promise<PushMessaging | null> {
+  const push = config.push;
+  if (push.driver !== "fcm") return null;
+  const fb = push.firebase;
+  if (!fb?.project_id) {
+    console.warn("[push] сервер объявил fcm без firebase-конфига — пуши отключены");
+    return null;
+  }
+  try {
+    const defaultOpts = getApps().length ? getApp().options : null;
+    if (defaultOpts && defaultOpts.projectId === fb.project_id) {
+      return messaging(); // тот же проект, что зашит — дефолтный app
+    }
+    let app = getApps().find((a) => a.name === SECONDARY_APP_NAME);
+    if (!app) {
+      try {
+        app = await initializeApp(
+          {
+            projectId: fb.project_id,
+            apiKey: fb.api_key,
+            appId: fb.app_id,
+            messagingSenderId: fb.sender_id,
+            // модульный initializeApp валидирует опции ЖЁСТКО: databaseURL и
+            // storageBucket обязательны (node_modules RNFB registry/app.js),
+            // но в google-services.json databaseURL не бывает — синтезируем
+            // канонический дефолт RTDB (не используется, только для валидации)
+            databaseURL: `https://${fb.project_id}-default-rtdb.firebaseio.com`,
+            storageBucket: fb.storage_bucket || `${fb.project_id}.appspot.com`,
+          },
+          SECONDARY_APP_NAME,
+        );
+      } catch (initError) {
+        // гонка инициализации: если app создал параллельный вызов — переиспользуем;
+        // если create реально упал — наружу (внешний catch отключит пуши)
+        console.warn("[push] secondary initializeApp failed", initError);
+        app = getApp(SECONDARY_APP_NAME);
+      }
+    }
+    return new SecondaryMessaging(messaging(), fb.sender_id);
+  } catch (e) {
+    console.warn("[push] конфиг firebase сервера нерабочий — пуши отключены", e);
+    return null;
+  }
+}
+
+/** Смена сервера: secondary-app предыдущего сервера нужно убить, иначе повторный
+ * initializeApp с тем же именем вернёт app со СТАРЫМИ опциями (§19.3). */
+export async function resetSecondaryFirebaseApp(): Promise<void> {
+  const existing = getApps().find((a) => a.name === SECONDARY_APP_NAME);
+  if (existing) {
+    await deleteApp(existing).catch(() => {});
+  }
+}
 
 /** Текущий открытый чат — его уведомления не показываем и смываем. */
 let activeChatId: string | null = null;
@@ -81,7 +205,9 @@ export async function registerPushToken(): Promise<void> {
   registerInFlight = (async () => {
     try {
       if (Platform.OS !== "android") return;
-      const token = await messaging().getToken();
+      const m = await activeMessaging();
+      if (!m) return; // сервер без пушей (§19.6) — регистрировать нечего
+      const token = await m.getToken();
       await api("/push/tokens", { method: "POST", body: { token, platform: "android" } });
     } catch (e) {
       // не критично: повтор на следующем старте / tokenRefresh
@@ -96,10 +222,12 @@ export async function registerPushToken(): Promise<void> {
 /** Отвязка токена при выходе (DELETE /push/tokens/{token}, §3.8). */
 export async function unregisterPushToken(): Promise<void> {
   if (Platform.OS !== "android") return;
+  const m = await activeMessaging();
+  if (!m) return;
   try {
-    const token = await messaging().getToken();
+    const token = await m.getToken();
     await api(`/push/tokens/${encodeURIComponent(token)}`, { method: "DELETE" });
-    await messaging().deleteToken(); // FCM перегенерирует при следующем getToken
+    await m.deleteToken(); // FCM перегенерирует при следующем getToken
   } catch (e) {
     console.warn("[push] unregister failed", e);
   }
@@ -190,11 +318,13 @@ function asString(v: unknown): string | undefined {
 
 // ── Установка всех обработчиков (один раз из корневого layout) ─────────────
 
-export function installPushHandlers(): void {
+export async function installPushHandlers(): Promise<void> {
   if (Platform.OS !== "android") return;
+  const m = await activeMessaging();
+  if (!m) return; // сервер без пушей — обработчики FCM не нужны
 
   // foreground: ленту обновляет realtime-диспетчер (дедуп §3.5) — не рисуем.
-  messaging().onMessage(() => {
+  m.onMessage(() => {
     /* no-op: WS доставил */
   });
 
@@ -208,7 +338,7 @@ export function installPushHandlers(): void {
   });
 
   // background/quit: Android будит JS — рисуем уведомление.
-  messaging().setBackgroundMessageHandler(async (message) => {
+  m.setBackgroundMessageHandler(async (message) => {
     await showMessageNotification(message);
   });
 
@@ -223,7 +353,7 @@ export function installPushHandlers(): void {
     .catch(() => {});
 
   // ротация токена на стороне FCM → перерегистрация (§3.8)
-  messaging().onTokenRefresh(() => {
+  m.onTokenRefresh(() => {
     if (useSession.getState().authenticated) void registerPushToken();
   });
 }

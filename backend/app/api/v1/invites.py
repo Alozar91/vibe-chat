@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.schemas.user import UserOut
 from app.services import invites as invite_service
 from app.services.keycloak_admin import get_kc_admin
+from app.services.server_info import require_join_code
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,7 +65,7 @@ class InviteCreatedOut(InviteOut):
     code: str  # показывается один раз при создании (§5)
 
 
-@router.post("/auth/register", response_model=UserOut, status_code=201)
+@router.post("/auth/register", response_model=UserOut, status_code=201, dependencies=[Depends(require_join_code)])
 async def register(body: RegisterIn, db: DbDep) -> UserOut:
     """Регистрация (§5): KC-аккаунт (username+password) + пользователь системы.
 

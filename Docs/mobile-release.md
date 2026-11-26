@@ -18,7 +18,7 @@
 - `versionName` — семантическая, `versionCode` — монотонный счётчик, **бамп на каждой release-сборке**, в **двух местах синхронно**:
   - `mobile/app.json` → `expo.version` и `expo.android.versionCode`
   - `mobile/android/app/build.gradle` → `versionCode` / `versionName` (~строки 95–96)
-- Текущее состояние: **`1.0.2` / code `3`** (`1.0.0`/1 → `1.0.1`/2 → `1.0.2`/3; 1.0.2 — управление чатами + баннер обновления).
+- Текущее состояние: **`1.0.3` / code `4`** (`1.0.0`/1 → `1.0.1`/2 → `1.0.2`/3 → `1.0.3`/4; 1.0.3 — self-host: экран подключения, динамический конфиг, per-app FCM).
 - Клиент сравнивает с сервером `versionName` (семантика X.Y.Z, `src/services/app-version.ts`); `versionCode` в гейте не участвует.
 
 ```bash
@@ -76,13 +76,17 @@ $BT/aapt dump badging app/build/outputs/apk/release/app-release.apk | grep '^pac
 $BT/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk | head -2
 # → CN=Vibe Chat Release, OU=IT, O=Vibe Chat, C=RU
 
-# 3) env запёкся (значение из mobile/.env есть в бандле)
+# 3) статический env: с 1.0.3 конфиг ДИНАМИЧЕСКИЙ (экран подключения) — статических
+#    EXPO_PUBLIC_* в бандле быть НЕ должно (исключение — dev-override LiveKit):
 unzip -p app/build/outputs/apk/release/app-release.apk assets/index.android.bundle \
-  | strings | grep -c "<значение EXPO_PUBLIC_API_BASE>"
-# → ≥ 1; 0 = env не запёкся, APK собирать бессмысленно (упадёт на старте)
+  | strings | grep -c "EXPO_PUBLIC_API_BASE"
+# → 0 (наличие = в бандл попала старая сборка — собирать бессмысленно)
 ```
 
-Smoke на эмуляторе: uninstall старого → `adb install` → логин → чаты → отправка сообщения.
+Smoke на эмуляторе: uninstall старого → `adb install` → экран подключения (release
+требует https, кроме dev-адресов localhost/10.0.2.2 — зеркалит NSC) → подключить
+сервер → логин → чаты → отправка сообщения. Приложение требует https, кроме dev-адресов
+`localhost`/`10.0.2.2` (зеркалит cleartext-исключения NSC — эмулятор/adb reverse).
 
 ## 6. Установка и проверка обновления поверх
 

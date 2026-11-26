@@ -12,6 +12,7 @@ from app.api.deps import UserDep
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services import push as push_service
+from app.services.server_info import require_join_code
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +50,7 @@ class AppVersionOut(BaseModel):
     latest_version: str
 
 
-@version_router.get("/app/version", response_model=AppVersionOut)
+@version_router.get("/app/version", response_model=AppVersionOut, dependencies=[Depends(require_join_code)])
 async def app_version() -> AppVersionOut:
     """Без аутентификации (§3.8): клиент сравнивает свою версию при старте."""
     s = get_settings()
